@@ -39,7 +39,7 @@ MIT Licence
 ## Requirements
 - a modern GPU
 - python 3: [Anaconda](https://anaconda.org) is recommended
-- PyTorch
+- PyTorch >= 1.8
 - CubicalRipser: install by the following command
 
     % pip install git+https://github.com/shizuo-kaji/CubicalRipser_3dim
@@ -65,7 +65,7 @@ Note that instead of synthesised images, we can use any image dataset (e.g., Ima
 
 ## Model pre-training
 
-    % python pretraining.py -o 'weights' --numof_classes=200 -ph pre -t 'random' -pd PH_random
+    % python pretraining.py -o 'weights' --numof_classes=200 -ph pre -t 'random' -pd PH_random -u 'resnet50'
 
 You will find a pretrained weight file (e.g., `resnet50_epoch90.pth`) under the directory 'result/XX', where XX is automatically generated from the date.
 

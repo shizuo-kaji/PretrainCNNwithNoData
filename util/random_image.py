@@ -5,7 +5,6 @@
 #%%
 import numpy as np
 from scipy.fft import fft2, ifft2
-import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.ndimage.morphology import distance_transform_edt
 from skimage.filters import threshold_otsu

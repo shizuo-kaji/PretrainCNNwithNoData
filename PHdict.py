@@ -16,7 +16,6 @@ from skimage.filters import threshold_otsu
 from PIL import Image
 from multiprocessing import Pool
 from functools import partial
-import persim
 
 def dt(img, binarize=True):
     if img.max()==img.min():
@@ -158,6 +157,7 @@ if __name__== "__main__":
         sns.lineplot(np.arange(len(meanPHb1)),meanPHb1, legend="full")
         plt.show()
     elif args.compute_persistence_image:
+        import persim
         task = partial(comp_save_persistence_image, args=args)
         pool = Pool(args.num_workers)
         with tqdm(total=len(fns)) as t:

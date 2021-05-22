@@ -23,9 +23,9 @@ def arguments():
 	parser.add_argument("--max_life", '-ml', default=50, type = int, help="life time for PH regression")
 	parser.add_argument('--affine', '-aff', default=False, action='store_true', help='apply random affine transformation')
 	# network settings
-	parser.add_argument("--usenet", default="resnet50", type = str, help="network architecture")
+	parser.add_argument("--usenet", '-u', default="resnet50", type = str, help="network architecture")
 	parser.add_argument("--epochs", '-e', default=90, type = int, help="number of training epochs")
-	parser.add_argument("--numof_pretrained_classes", "-npc", default=200, type = int, help="dimension of pre-training channels")
+	parser.add_argument("--numof_pretrained_classes", "-npc", default=-1, type = int, help="dimension of pre-training channels")
 	parser.add_argument("--numof_classes", '-nc', default=100, type = int, help="num of fine-tuning classes")
 	parser.add_argument("--numof_fclayer", default=4096, type = int, help="dimension of fc layer")
 	# optimiser
