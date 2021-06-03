@@ -20,7 +20,7 @@ def train(args, model, device, train_loader, optimizer, epoch, criterion):
         output = model(data)
         loss = criterion(output, target)
 
-        if args.persistence is not None:
+        if target.dtype == torch.float32:
             acc1 = 0
         else:
             acc1 = accuracy(output, target, topk=(1,))[0][0]
@@ -60,7 +60,7 @@ def validate(args, model, device, val_loader, criterion):
             loss = criterion(output, target)
 
             k = min(args.numof_classes,5)
-            if args.persistence is not None:
+            if target.dtype == torch.float32:
                 acc1, acc5 = [0], [0]
             else:
                 acc1, acc5 = accuracy(output, target, topk=(1,k))

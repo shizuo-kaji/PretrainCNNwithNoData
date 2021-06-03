@@ -21,6 +21,8 @@ from train_val import train, validate
 
 from torch.utils.tensorboard import SummaryWriter
 
+args = arguments()
+
 def worker_init_fn(worker_id):
     random.seed(worker_id+args.seed)
 
@@ -157,9 +159,12 @@ def dpp_train(rank, world_size, args):
         dist.destroy_process_group()
 
 if __name__== "__main__":
-    args = arguments()
     print(args)
     dtstr = dt.now().strftime('%Y_%m%d_%H%M')
+    if "CIFAR100" in args.train:
+        dtstr += "_C100"
+    elif "omniglot" in args.train:        
+        dtstr += "_omn"
     args.logdir = os.path.join(os.path.dirname(__file__),"runs/{}".format(dtstr))
     args.output = os.path.join(os.path.expanduser(args.output), dtstr)
     os.makedirs(args.output, exist_ok=True)

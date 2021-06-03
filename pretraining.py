@@ -19,15 +19,16 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from dataset import DatasetFolderPH, DatasetGeneratePH
+from dataset import DatasetFolderPH
 from arguments import arguments
 from train_val import train, validate
 from model_select import model_select
 from torch.utils.tensorboard import SummaryWriter
 
+args = arguments()
 
 def worker_init_fn(worker_id):
-    random.seed(worker_id)
+    random.seed(worker_id+args.seed)
 
 def dpp_train(rank, world_size, args):
     # setup parallelisation environment
@@ -58,7 +59,10 @@ def dpp_train(rank, world_size, args):
     if args.affine:
         tr = [transforms.RandomAffine(degrees=(-180,180), scale=(0.5,2), shear=(-100,100,-100,100))] + tr
     train_transform = transforms.Compose(tr)
-    if args.persistence is not None:
+    if args.label_type == "class":
+        train_dataset = datasets.ImageFolder(args.train, transform=train_transform)
+        criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
+    else:
         PHdir = None
         if os.path.isdir(args.path2PHdir):
             print("PH will be loaded from: ",args.path2PHdir)
@@ -67,13 +71,10 @@ def dpp_train(rank, world_size, args):
             print("PH histogram computed on the fly")
         if args.train is None:
             print("training images are generated on the fly.")
-            train_dataset = DatasetGeneratePH(n_samples=args.n_samples, size=args.img_size, alpha_range=args.alpha_range, beta_range=args.beta_range, prob_binary=args.prob_binary, transform=train_transform, persistence=args.persistence, bins=args.numof_classes, max_life=args.max_life)
+            train_dataset = DatasetFolderPH(root=None, transform=train_transform, args=args)
         else:
-            train_dataset = DatasetFolderPH(args.train, transform=train_transform, persistence=args.persistence, bins=args.numof_classes, max_life=args.max_life, PHdir=PHdir, precomputed=args.precomputed)        
+            train_dataset = DatasetFolderPH(args.train, transform=train_transform, args=args)        
         criterion = nn.MSELoss(reduction='mean').to(device)
-    else:
-        train_dataset = datasets.ImageFolder(args.train, transform=train_transform)
-        criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
 
     for i in range(args.output_training_images):
         img = (train_dataset[i][0]).numpy()
@@ -94,10 +95,10 @@ def dpp_train(rank, world_size, args):
     if args.val is not None and rank==0:
         val_transform = transforms.Compose([transforms.Resize((args.crop_size,args.crop_size), interpolation=transforms.InterpolationMode.BILINEAR),
                                          transforms.ToTensor(), normalize])
-        if args.persistence is not None:
-            val_dataset = DatasetFolderPH(args.val, transform=val_transform, persistence=args.persistence, bins=args.numof_classes, max_life=args.max_life, PHdir=PHdir, precomputed=args.precomputed)
-        else:
+        if args.label_type == "class":
             val_dataset = datasets.ImageFolder(args.val, transform=val_transform)
+        else:
+            val_dataset = DatasetFolderPH(args.val, transform=val_transform,args=args)
         val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
                                                  num_workers=args.num_workers, pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn)
         print(len(val_dataset), "validation images loaded.")
@@ -181,10 +182,9 @@ def dpp_train(rank, world_size, args):
 
 if __name__== "__main__":
     starttime = time.time()
-    args = arguments()
     print(args)
-    dtstr = dt.now().strftime('%Y_%m%d_%H%M')
-    args.logdir = os.path.join(os.path.dirname(__file__),"runs/{}".format(dtstr))
+    dtstr = dt.now().strftime('%Y_%m%d_%H%M_{}_ml{}_n{}'.format(args.label_type,args.max_life,args.numof_classes))
+    args.logdir = os.path.join(os.path.dirname(__file__),"runs/pt/{}".format(dtstr))
     args.output = os.path.join(os.path.expanduser(args.output), dtstr)
     os.makedirs(args.output, exist_ok=True)
     os.makedirs(args.logdir, exist_ok=True)

@@ -13,15 +13,23 @@ def arguments():
 	parser.add_argument('--resume', default='', type=str, help='path to checkpoint file to resume')
 	parser.add_argument("--pidf", '-p', default=None, type = str, help="backend for parallelisation")
 	parser.add_argument("--world_size", '-ws', default=2, type = int, help="number of GPUs to be used")
-	parser.add_argument('--persistence', '-ph', default=None, type=str, choices=[None, 'pre', 'post'], help='PH computation pre or post transformation')
-	parser.add_argument('--precomputed', '-pc', default=False, action='store_true', help='pre-computed persistence histogram/image')
 	# image generator
 	parser.add_argument("--alpha_range", '-ar', default=[0.01,1], type = float, nargs=2, help="synthesised image frequency pattern")
 	parser.add_argument("--beta_range", '-br', default=[0.5,2], type = float, nargs=2, help="synthesised image frequency pattern")
 	parser.add_argument("--n_samples", '-n', default=50000, type = int, help="number of images generated in an epoch")
-	parser.add_argument("--prob_binary", '-pb', default=1.0, type = float, help="probability of binarising the generated image")
-	parser.add_argument("--max_life", '-ml', default=50, type = int, help="life time for PH regression")
+	parser.add_argument("--prob_binary", '-pb', default=0.5, type = float, help="probability of binarising the generated image")
+	parser.add_argument("--prob_colour", '-pc', default=0.5, type = float, help="probability of generating colour images")
+	# persistent homology (label) parameter
+	parser.add_argument("--max_life", '-ml', default=50, type = int, help="maximum life time for PH regression")
+	parser.add_argument("--max_birth", '-maxb', default=None, type = int, help="maximum birth time for PH regression")
+	parser.add_argument('--min_birth', '-minb', type=int, default=None)
 	parser.add_argument('--affine', '-aff', default=False, action='store_true', help='apply random affine transformation')
+	parser.add_argument('--bandwidth', '-bd', type=int, default=1, help='bandwidth of label smoothing')
+	parser.add_argument('--persImg_sigma', type=float, default=100, help='sigma for persistence image')
+	parser.add_argument('--label_type', '-lt', default="PH_hist", choices=['raw','life_curve','PH_hist','persistence_image','class'], help='label type')
+	parser.add_argument('--persistence_after_transform', '-pat', action="store_true", help='PH computation after applying transformation')
+	parser.add_argument('--distance_transform', '-dt', action="store_true", default=True, help="apply distance transform")
+	parser.add_argument('--gradient', '-g', action="store_true", default=False, help="apply gradient filter")
 	# network settings
 	parser.add_argument("--usenet", '-u', default="resnet50", type = str, help="network architecture")
 	parser.add_argument("--epochs", '-e', default=90, type = int, help="number of training epochs")
@@ -37,12 +45,22 @@ def arguments():
 	# etc
 	parser.add_argument("--start-epoch", default=1, type = int, help="starting epoch")
 	parser.add_argument("--batch_size", '-b', default=96, type = int, help="batch size for training")
-	parser.add_argument("--img_size", default=256, type = int, help="image size")
-	parser.add_argument("--crop_size", default=224, type = int, help="crop size")
+	parser.add_argument("--img_size", '-is', default=256, type = int, help="image size")
+	parser.add_argument("--crop_size", '-cs', default=224, type = int, help="crop size")
 	parser.add_argument("--save-interval", '-si', default=90, type = int, help="checkpointing frequency in epochs")
 	parser.add_argument("--log-interval", default=100, type=int, help="logging frequency in iterations")
 	parser.add_argument("--seed", default=1, type=int, help="random seed")
 	parser.add_argument("--num_workers", '-nw', default=8, type = int, help="num of workers for dataloader")
 	parser.add_argument("--output_training_images", '-oti', default=0, type = int, help="save sample training images to file")
 	args = parser.parse_args()
+
+	if args.max_birth is None:
+		args.max_birth = args.max_life
+
+	if args.min_birth is None:
+		if args.gradient or not args.distance_transform:
+			args.min_birth = 0
+		else:
+			args.min_birth = -args.max_birth
+
 	return args
