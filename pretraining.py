@@ -183,7 +183,8 @@ def dpp_train(rank, world_size, args):
 if __name__== "__main__":
     starttime = time.time()
     print(args)
-    dtstr = dt.now().strftime('%Y_%m%d_%H%M_{}_ml{}_n{}'.format(args.label_type,args.max_life,args.numof_classes))
+    grd ="grad_" if args.gradient else ""
+    dtstr = dt.now().strftime('%Y_%m%d_%H%M_{}{}_ml{}_n{}'.format(grd,args.label_type,args.max_life,args.numof_classes))
     args.logdir = os.path.join(os.path.dirname(__file__),"runs/pt/{}".format(dtstr))
     args.output = os.path.join(os.path.expanduser(args.output), dtstr)
     os.makedirs(args.output, exist_ok=True)

@@ -14,6 +14,7 @@ from skimage.filters import threshold_otsu
 
 
 def generate_random_image(args):
+    np.random.seed()
     sample=np.zeros(1)
     p = np.random.uniform(0,1)
     if p<args.prob_colour:

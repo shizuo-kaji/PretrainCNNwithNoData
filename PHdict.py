@@ -113,7 +113,7 @@ def hist_PH(ph, args):
     # plt.show()
     # plt.hist(pds[1][:,0],weights=pds[1][:,1]-pds[1][:,0])
     # plt.show()
-    max_birth_for_h0 = args.max_birth if args.gradient else 0 ## all 0-cycles are born before 0
+    max_birth_for_h0 = 0 if (args.distance_transform and not args.gradient) else args.max_birth ## all 0-cycles are born before 0 for distance transformed
     hsb0, _ = np.histogram(pds[0][:,0],bins=args.num_bins[2], range=(args.min_birth,max_birth_for_h0), weights=pds[0][:,1]-pds[0][:,0]) 
     hsb1, _ = np.histogram(pds[1][:,0],bins=args.num_bins[3], range=(args.min_birth,args.max_birth), weights=pds[1][:,1]-pds[1][:,0])
     # lifetime weighting
@@ -124,7 +124,7 @@ def hist_PH(ph, args):
     hsl1 = kern_smooth(hsl1, bandwidth=args.bandwidth, kern='hanning')
     hsb0 = kern_smooth(hsb0, bandwidth=args.bandwidth, kern='hanning')
     hsb1 = kern_smooth(hsb1, bandwidth=args.bandwidth, kern='hanning')
-    # log
+    # log and scaling
     hsl0,hsl1,hsb0,hsb1 = np.log(hsl0+1), np.log(hsl1+1), np.log(hsb0+1)/100, np.log(hsb1+1)
     # print(np.min(pds[0][:,0]),np.max(pds[0][:,0]),np.min(pds[1][:,0]),np.max(pds[1][:,0]))
     # print(np.min(pds[0][:,1]),np.max(pds[0][:,1]),np.min(pds[1][:,1]),np.max(pds[1][:,1]),"\n")
@@ -259,7 +259,7 @@ if __name__== "__main__":
             fname = fns[i]
             colour = Image.open(fname)
             sample = (np.array(colour.convert('L'),dtype=np.float64))
-            mask = preprocess_image(sample, gradient=args.gradient, distance_transform=False, binarize=True)
+            mask = preprocess_image(sample, gradient=args.gradient, distance_transform=False, binarize=True) ## used only for preview
             dt = preprocess_image(sample, gradient=args.gradient, distance_transform=args.distance_transform, binarize=True)
             print(dt.min(),dt.max())
             ph = comp_PH(sample, gradient=args.gradient, distance_transform=args.distance_transform)

@@ -59,20 +59,21 @@ The following computes the persistent homology
 
     % python PHdict.py random -o PH_random -it jpg
 
-for the jpeg images (-it jpg) under the directory `random` and outputs the results under `PH_random`.
+of (the distance transform of the binarisation of) the jpeg images (-it jpg) under the directory `random` and outputs the results under `PH_random`.
+Optionally, the gradient is taken before applying the distance transform when (-g) is specified.
 
 Note that instead of synthesised images, we can use any image dataset (e.g., ImageNet).
 
 ## Model pre-training
 
-    % python pretraining.py -o 'weights' --numof_classes=200 -ph pre -t 'random' -pd PH_random -u 'resnet50' --max_life 80 --max_birth 80 --bandwidth 2
+    % python pretraining.py -o 'weights' --numof_classes=200 --label_type PH_hist -t 'random' -pd PH_random -u 'resnet50' --max_life 80 --max_birth 80 --bandwidth 2
 
 You will find a pretrained weight file (e.g., `resnet50_epoch90.pth`) under the directory 'result/XX', where XX is automatically generated from the date.
 Different types of persistent-homology-based labelling can be specified, for example, by (--label_type 'persistence_image').
 
 If you wish to generate training images and labels on the fly (not efficient), do not specify the training images (i.e., do not use -t):
 
-    % python pretraining.py -o 'weights' --numof_classes=200 -ph pre -pd PH_random -u 'resnet50' --alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5 -n 50000
+    % python pretraining.py -o 'weights' --numof_classes=200 --label_type PH_hist -pd PH_random -u 'resnet50' --alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5 -n 50000
 
 The arguments (--alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5) are parameters for image generation. 
 In each epoch, 50000 (-n 50000) images are generated.
@@ -83,7 +84,7 @@ The pretraining code saves the weights in a standard PyTorch model format, so yo
 
 Alternatively, we provide a code for finetuning
 
-    % python finetuning.py -t 'data/CIFAR100/train' -val 'data/CIFAR100/test' -pw 'weights/XX/resnet50_epoch90.pth' -npc 200 -o 'result' -nc 100 -e 90
+    % python finetuning.py -t 'data/CIFAR100/train' -val 'data/CIFAR100/test' -pw 'weights/XX/resnet50_epoch90.pth' -o 'result' -nc 100 -e 90
 
 The CIFAR100 dataset can be obtained by the [script](https://github.com/chatflip/ImageRecognitionDataset) (included in this repository as well)
 

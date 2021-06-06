@@ -17,6 +17,7 @@ from functools import partial
 from dataset import generate_random_image
 
 def generate_and_save_random_image(idx, args=None):
+    #np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
     sample = generate_random_image(args)
     sample.save(os.path.join(args.output,"{}{:0>8}.jpg".format(args.prefix,idx)))
 
