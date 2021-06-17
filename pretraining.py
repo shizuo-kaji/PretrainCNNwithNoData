@@ -62,13 +62,13 @@ def dpp_train(rank, world_size, args):
     if args.label_type == "class":
         train_dataset = datasets.ImageFolder(args.train, transform=train_transform)
         criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
-    else:
-        PHdir = None
+    else:        
         if os.path.isdir(args.path2PHdir):
             print("PH will be loaded from: ",args.path2PHdir)
             PHdir = args.path2PHdir
         else:
-            print("PH histogram computed on the fly")
+            print("PH computed on the fly")
+            PHdir = None
         if args.train is None:
             print("training images are generated on the fly.")
             train_dataset = DatasetFolderPH(root=None, transform=train_transform, args=args)

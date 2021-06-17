@@ -6,19 +6,17 @@ import torch.nn as nn
 import torchvision.models as models
 
 def model_select(args):
+	param, pretrained = False, False
 	if (args.path2weight == "imagenet"):
 		pretrained = True
 		args.numof_pretrained_classes = 1000
 		print("use imagenet pretrained model")
 	else:
-		pretrained = False
-		
-	if os.path.exists(args.path2weight):
-		print ("use pretrained model : {}".format(args.path2weight))
-		param = torch.load(args.path2weight, map_location=lambda storage, loc: storage)
-	else:
-		print ("weight file {} not found: train from scratch!\n".format(args.path2weight))
-		param = False
+		if os.path.exists(args.path2weight):
+			print ("use pretrained model : {}".format(args.path2weight))
+			param = torch.load(args.path2weight, map_location=lambda storage, loc: storage)
+		else:
+			print ("weight file {} not found: train from scratch!\n".format(args.path2weight))
 
 	if args.numof_pretrained_classes <= 0:
 		if param and "fc.bias" in param:

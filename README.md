@@ -31,14 +31,14 @@ To sum up,
 - Acquires robust image features based on topology
 
 
-
+This work is partially supported by ZOZO Technologies.
 
 ## Licence
 MIT Licence
 
 ## Requirements
 - a modern GPU
-- python 3: [Anaconda](https://anaconda.org) is recommended
+- Python 3: [Anaconda](https://anaconda.org) is recommended
 - PyTorch >= 1.8
 - CubicalRipser: install by the following command
 
@@ -89,4 +89,23 @@ Alternatively, we provide a code for finetuning
 The CIFAR100 dataset can be obtained by the [script](https://github.com/chatflip/ImageRecognitionDataset) (included in this repository as well)
 
     % python util/ImageDatasetsDownloader.py --dataset CIFAR100
+
+
+## Experiments on the accuracy improvement in iamge classification tasks
+
+![C100](https://github.com/shizuo-kaji/PretrainCNNwithNoData/blob/master/demo/C100.jpg?raw=true)
+![C100](https://github.com/shizuo-kaji/PretrainCNNwithNoData/blob/master/demo/omniglot.jpg?raw=true)
+
+The graph shows the classification accuracies of the CIFAR100 and the Omniglot dataset with models pretrained in different manners.
+- IMN indicates the usual ImageNet-1k pretrained model.
+- gen0.5c_ml40_n148_best indicates the model pretrained with synthetic random image as above.
+- FB1000 indicates the model pretrained with FractalDB-1k downloadable at [here](https://hirokatsukataoka16.github.io/Pretraining-without-Natural-Images/)
+- scratch indicates the model without any pretraining (random initialisation)
+- PHC100 indicates the model pretrained with the CIFAR100 dataset but without using labels; instead, pretrained by persistent homology as above.
+- PH_FB1000 indicates the model pretrained with the FractalDB-1k dataset but without using labels; instead, pretrained by persistent homology as above.
+
+For the natural image classification (CIFAR100), the ImageNet pretrained outperforms others by a large margin.
+Still, it is notable that our method is far better than learning from scratch.
+
+For hand-written character classification with small data (Omniglot), where human-like shape recognition is required, our method outperforms the ImageNet pretrained model. We speculate that the topological feature learned with our method is better generalisable to this kind of tasks.
 

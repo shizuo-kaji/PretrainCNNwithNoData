@@ -37,8 +37,8 @@ def arguments():
 	parser.add_argument("--numof_classes", '-nc', default=100, type = int, help="num of fine-tuning classes")
 	parser.add_argument("--numof_fclayer", default=4096, type = int, help="dimension of fc layer")
 	# optimiser
-	parser.add_argument("--lr_fine", '-lrp', default=0.01, type = float, help="initial learning rate for pretraining")
-	parser.add_argument("--lr_pre", '-lrf', default=0.1, type = float, help="initial learning rate for finetuning")
+	parser.add_argument("--lr_fine", '-lrf', default=0.01, type = float, help="initial learning rate for pretraining")
+	parser.add_argument("--lr_pre", '-lrp', default=0.1, type = float, help="initial learning rate for finetuning")
 	parser.add_argument("--momentum", default=0.9, type = float, help="momentum")
 	parser.add_argument("--weight_decay", "-wd", default=1e-04, type = float, help="weight decay")
 	parser.add_argument("--optimizer", "-op", default='sgd', type = str, help="optimiser and scheduler")

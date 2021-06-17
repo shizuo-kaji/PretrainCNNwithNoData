@@ -21,12 +21,12 @@ def train(args, model, device, train_loader, optimizer, epoch, criterion):
         loss = criterion(output, target)
 
         if target.dtype == torch.float32:
-            acc1 = 0
+            acc1 = [0]
         else:
-            acc1 = accuracy(output, target, topk=(1,))[0][0]
+            acc1 = accuracy(output, target, topk=(1,))[0]
 
-        losses.update(loss.item()/data.size(0), data.size(0))
-        top1.update(acc1, data.size(0))
+        losses.update(loss.item(), data.size(0))
+        top1.update(acc1[0], data.size(0))
 
         optimizer.zero_grad()
         loss.backward()
@@ -64,7 +64,7 @@ def validate(args, model, device, val_loader, criterion):
                 acc1, acc5 = [0], [0]
             else:
                 acc1, acc5 = accuracy(output, target, topk=(1,k))
-            losses.update(loss.item()/data.size(0), data.size(0))
+            losses.update(loss.item(), data.size(0))
             top1.update(acc1[0], data.size(0))
             top5.update(acc5[0], data.size(0))
         

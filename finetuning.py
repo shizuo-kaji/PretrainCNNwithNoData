@@ -47,13 +47,14 @@ def dpp_train(rank, world_size, args):
         print("paralell trainer based on gloo")
 
     # training dataset
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     train_transform = transforms.Compose([
                         transforms.Resize(args.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
-                        transforms.RandomResizedCrop(args.crop_size,scale=(0.7,1.0)),
+                        transforms.RandomResizedCrop(args.crop_size,scale=(0.8,1.0),ratio=(0.9,1.1)),
                         #transforms.RandomCrop(args.crop_size),
                         transforms.RandomHorizontalFlip(),
                         transforms.ToTensor(),
-                        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+                        normalize])
     train_dataset = datasets.ImageFolder(args.train, transform=train_transform)
     if args.pidf in ["nccl","gloo"]:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset,num_replicas=world_size,rank = rank)
@@ -70,7 +71,7 @@ def dpp_train(rank, world_size, args):
                             transforms.Resize(args.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
                             transforms.CenterCrop(args.crop_size),
                             transforms.ToTensor(),
-                            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+                            normalize])
         if not args.val:
             args.val=args.train.replace('train','val')
         test_dataset = datasets.ImageFolder(args.val,test_transform)
