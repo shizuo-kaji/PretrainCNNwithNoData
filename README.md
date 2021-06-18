@@ -7,6 +7,9 @@ The obtained model can be fine-tuned for any tasks (transfer learning).
 
 The code also works with any image dataset without labels; in this case, only labels are mathematically generated.
 
+This is a companion code for the paper "Pretraining Convolutional Neural Networks without Data" by Shizuo KAJI and
+Yohsuke Watanabe, in preparation.
+
 
 The pretraining is useful when ImageNet pretraining is not appropriate by some reasons such as fairness.
 See
@@ -30,8 +33,6 @@ To sum up,
 - No need for manual labelling
 - Acquires robust image features based on topology
 
-
-This work is partially supported by ZOZO Technologies.
 
 ## Licence
 MIT Licence
