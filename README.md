@@ -97,16 +97,24 @@ The CIFAR100 dataset can be obtained by the [script](https://github.com/chatflip
 ![C100](https://github.com/shizuo-kaji/PretrainCNNwithNoData/blob/master/demo/C100.jpg?raw=true)
 ![C100](https://github.com/shizuo-kaji/PretrainCNNwithNoData/blob/master/demo/omniglot.jpg?raw=true)
 
-The graph shows the classification accuracies of the CIFAR100 and the Omniglot dataset with models pretrained in different manners.
-- IMN indicates the usual ImageNet-1k pretrained model.
-- gen0.5c_ml40_n148_best indicates the model pretrained with synthetic random image as above.
-- FB1000 indicates the model pretrained with FractalDB-1k downloadable at [here](https://hirokatsukataoka16.github.io/Pretraining-without-Natural-Images/)
-- scratch indicates the model without any pretraining (random initialisation)
-- PHC100 indicates the model pretrained with the CIFAR100 dataset but without using labels; instead, pretrained by persistent homology as above.
-- PH_FB1000 indicates the model pretrained with the FractalDB-1k dataset but without using labels; instead, pretrained by persistent homology as above.
+The graph shows the classification accuracies of the CIFAR100 and the [Omniglot](https://github.com/brendenlake/omniglot) dataset 
+with models pretrained in different datasets and tasks.
+The naming convention used in the graphs is PROBLEM_DATASET_TASK, where
+- PROBLEM is either C100 (CIFAR100) or OMN (Omniglot).
+- scratch indicates without any pretraining (random initialisation)
+- DATASET indicates the dataset used for pretraining. 
+IMN is the usual ImageNet-1k dataset, 
+FB1000 (FB10000) is the FractalDB-1k (FractalDB-10k) dataset downloadable at [here](https://hirokatsukataoka16.github.io/Pretraining-without-Natural-Images/),
+C100 is the CIFAR100 dataset,
+and gen is the synthetic random image dataset generated as above.
+- TASK indicates the task used for pretraining.
+label means the classification of the labels that come with the dataset.
+PH means the regression of persistent homology as above.
 
-For the natural image classification (CIFAR100), the ImageNet pretrained outperforms others by a large margin.
-Still, it is notable that our method is far better than learning from scratch.
+For the natural image classification (CIFAR100), the ImageNet pretrained model outperforms others by a large margin.
+Still, it is notable that our method (gen_PH) is far better than learning from scratch.
 
-For hand-written character classification with small data (Omniglot), where human-like shape recognition is required, our method outperforms the ImageNet pretrained model. We speculate that the topological feature learned with our method is better generalisable to this kind of tasks.
+For the one-shot learning of hand-written character classification (Omniglot), our method (gen_PH) outperforms the ImageNet pretrained model. 
+Omniglot consists of one training image and 19 test images per character so that human-like shape recognition is required to perform the classification task.
+We speculate that the topological feature learned with our method is better generalisable to this kind of tasks.
 
