@@ -7,11 +7,11 @@ The obtained model can be fine-tuned for any tasks (transfer learning).
 
 The code also works with any image dataset without labels; in this case, only labels are mathematically generated.
 
-This is a companion code for the paper "Pretraining Convolutional Neural Networks without Data" by Shizuo KAJI and
+This is a companion code for the paper "Pretraining Convolutional Neural Networks without Data" by Shizuo Kaji and
 Yohsuke Watanabe, in preparation.
 
 
-The pretraining is useful when ImageNet pretraining is not appropriate by some reasons such as fairness.
+Our pretraining is useful when ImageNet pretraining is not appropriate by some reasons such as fairness.
 See
 - Ninareh Mehrabi et al., A Survey on Bias and Fairness in Machine Learning, [arXiv:1908.09635](https://arxiv.org/abs/1908.09635)
 - Maithra Raghu et al., Transfusion: Understanding Transfer Learning for Medical Imaging, NeurIPS 2019, [arXiv:1902.07208](https://arxiv.org/abs/1902.07208)
@@ -49,7 +49,7 @@ MIT Licence
 Training data can be generated on the fly, but for the efficiency,
 we recommend to precompute training images and their persistent homology.
 
-    % python random_image.py -pb 0.5 -pc 0.5 -o random -n 50000
+    % python random_image.py -pb 0.5 -pc 0.5 --prefix t -o random -n 50000
 
 generates 50000 images (-n 50000) under the directory `random` (-o random). 
 Half of them (-pc 0.5) are colour and the rest is grayscale.
@@ -92,7 +92,7 @@ The CIFAR100 dataset can be obtained by the [script](https://github.com/chatflip
     % python util/ImageDatasetsDownloader.py --dataset CIFAR100
 
 
-## Experiments on the accuracy improvement in iamge classification tasks
+## Experiments on the accuracy improvement in image classification tasks
 
 ![C100](https://github.com/shizuo-kaji/PretrainCNNwithNoData/blob/master/demo/C100.jpg?raw=true)
 ![C100](https://github.com/shizuo-kaji/PretrainCNNwithNoData/blob/master/demo/omniglot.jpg?raw=true)
