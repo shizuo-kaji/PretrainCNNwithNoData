@@ -6,6 +6,7 @@ import json
 import numpy as np
 from PIL import Image
 from datetime import datetime as dt
+import socket
 
 import torch
 import torchvision
@@ -53,7 +54,7 @@ def dpp_train(rank, world_size, args):
     # training dataset
     #normalize = transforms.Normalize(mean=[0.2, 0.2, 0.2], std=[0.5, 0.5, 0.5])
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    tr = [transforms.RandomCrop((args.crop_size,args.crop_size)),transforms.ToTensor(),normalize]
+    tr = [transforms.RandomCrop((args.crop_size,args.crop_size)),transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize]
     if args.img_size > args.crop_size:
         tr = [transforms.Resize(args.img_size, interpolation=transforms.InterpolationMode.BILINEAR)] + tr
     if args.affine:
@@ -65,10 +66,8 @@ def dpp_train(rank, world_size, args):
     else:        
         if os.path.isdir(args.path2PHdir):
             print("PH will be loaded from: ",args.path2PHdir)
-            PHdir = args.path2PHdir
         else:
             print("PH computed on the fly")
-            PHdir = None
         if args.train is None:
             print("training images are generated on the fly.")
             train_dataset = DatasetFolderPH(root=None, transform=train_transform, args=args)
@@ -124,7 +123,9 @@ def dpp_train(rank, world_size, args):
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
         print("using cosine annealing.")
     else:
-        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[args.epochs//3,2*args.epochs//3], gamma=0.1)
+        #scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[args.epochs//3,2*args.epochs//3], gamma=0.1)
+        print("LR drops at: ", [(i+1) * args.epochs//args.lr_drop for i in range(args.lr_drop-1)])
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[(i+1) * args.epochs//args.lr_drop for i in range(args.lr_drop-1)], gamma=0.1)
 
     # checkpointing
     if args.resume:
@@ -150,16 +151,16 @@ def dpp_train(rank, world_size, args):
     for epoch in range(args.start_epoch, args.epochs + 1):
         if args.pidf in ["nccl","gloo"]:
             train_sampler.set_epoch(epoch)
-            loss, acc = train(args, model, rank, train_loader, optimizer, epoch, criterion)
+            loss, acc, _ = train(args, model, rank, train_loader, optimizer, epoch, [criterion])
         else:
-            loss, acc = train(args, model, device, train_loader, optimizer, epoch, criterion)
+            loss, acc, _ = train(args, model, device, train_loader, optimizer, epoch, [criterion])
         scheduler.step()
         if rank==0:
             writer.add_scalar("Loss/train", loss, epoch)
             writer.add_scalar("Acc/train", acc, epoch)
 
         if args.val is not None and rank==0:
-            validation_loss, val_acc  = validate(args, model, device, val_loader, criterion)
+            validation_loss, val_acc, _  = validate(args, model, device, val_loader, [criterion])
             writer.add_scalar("Loss/val", validation_loss, epoch)
             writer.add_scalar("Acc/val", val_acc, epoch)
         if ((args.save_interval>0 and epoch % args.save_interval == 0) or epoch == args.epochs) and rank==0:
@@ -182,11 +183,23 @@ def dpp_train(rank, world_size, args):
 
 if __name__== "__main__":
     starttime = time.time()
-    print(args)
     grd ="grad_" if args.gradient else ""
     dtstr = dt.now().strftime('%Y_%m%d_%H%M_{}{}_ml{}_n{}'.format(grd,args.label_type,args.max_life,args.numof_classes))
-    args.logdir = os.path.join(os.path.dirname(__file__),"runs/pt/{}".format(dtstr))
-    args.output = os.path.join(os.path.expanduser(args.output), dtstr)
+    dtstr += "_"+args.suffix
+
+    if args.label_type != "class":
+        dtstr += "_PH"
+    if "CIFAR100" in args.train:
+        dtstr += "_C100"
+    elif "omniglot" in args.train:        
+        dtstr += "_OMN"
+    else:
+        dtstr += "_rnd"
+
+    args.logdir = os.path.join(os.path.dirname(__file__),"runs/{}/pt/{}".format(socket.gethostname(),dtstr))
+    args.output = os.path.join(os.path.expanduser(args.output), dtstr).replace("result","weight")   
+    print(args)
+
     os.makedirs(args.output, exist_ok=True)
     os.makedirs(args.logdir, exist_ok=True)
     with open(os.path.join(args.output, "args.json"), mode="w") as f:
@@ -207,3 +220,4 @@ if __name__== "__main__":
     endtime = time.time()
     interval = endtime - starttime
     print("elapsed time = {0:d}h {1:d}m {2:d}s".format(int(interval/3600), int((interval%3600)/60), int((interval%3600)%60)))
+    print(args.logdir)

@@ -97,6 +97,7 @@ def life_curve(ph, dim, min_birth=None, max_birth=None, max_life=None):
 
 
 def hist_PH(ph, args):
+#    print(args.num_bins)
     pds =[ph[ph[:,0] == i, 1:3] for i in range(2)]
     #print(len(pds[0]),len(pds[1]))
     life = [pd[:,1]-pd[:,0] for pd in pds]

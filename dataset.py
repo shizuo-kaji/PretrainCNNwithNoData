@@ -53,6 +53,7 @@ class DatasetFolderPH(VisionDataset):
             root: str,
             loader: Callable[[str], Any] = None,
             transform: Optional[Callable] = None,
+            PH_vect_dim = None, # if set, used as the output dimension for PH regression, if not set, args.numof_classes is used instead
             args = None
     ) -> None:
         super(DatasetFolderPH, self).__init__(root, transform=transform)
@@ -61,11 +62,15 @@ class DatasetFolderPH(VisionDataset):
         if root is None:
             self.generate_on_the_fly = True
             self.n_samples = args.n_samples
+            self.classes = [0 for i in range(args.n_samples)]
+            self.n_classes = 1
         else:
             self.generate_on_the_fly = False
-            self.samples = glob.glob(os.path.join(self.root, "**/*.png"), recursive=True)
-            self.samples.extend(glob.glob(os.path.join(self.root, "**/*.jpg"), recursive=True))
+            #self.samples = glob.glob(os.path.join(self.root, "**/*.png"), recursive=True)
+            #self.samples.extend(glob.glob(os.path.join(self.root, "**/*.jpg"), recursive=True))
+            self.samples, self.classes = make_dataset(self.root)
             self.n_samples = len(self.samples)
+            self.n_classes = max(self.classes)+1
 
         if self.n_samples == 0:
             msg = "no files found in subfolders of: {}\n".format(self.root)
@@ -76,7 +81,10 @@ class DatasetFolderPH(VisionDataset):
         else:
             self.loader = loader
 
-        bins = args.numof_classes
+        bins = args.numof_classes if PH_vect_dim is None else PH_vect_dim
+        if not bins > 0:
+            print("Wrong output dimension!")
+            exit()
         if self.args.label_type in ["life_curve","persistence_image"]:
             self.args.num_bins = [bins//2,bins-bins//2]
         elif self.args.label_type == "PH_hist":
@@ -91,6 +99,7 @@ class DatasetFolderPH(VisionDataset):
             path = self.samples[index]
             sample = self.loader(path)
 
+        # apply image transform; if path2PHdir is set, then PH will be loaded from file and thus the order of transform does not matter.
         if self.args.persistence_after_transform and self.transform is not None:
             sample = self.transform(sample)
 
@@ -112,10 +121,16 @@ class DatasetFolderPH(VisionDataset):
                 exit()
     #        print(hs.shape, hs.max())
 
-        if not self.args.persistence_after_transform:
-            if self.transform is not None:
-                sample = self.transform(sample)
-        return sample, hs
+        if (not self.args.persistence_after_transform) and self.transform is not None:
+            sample = self.transform(sample)
+        if self.args.learning_mode == "simultaneous":
+            #onehot = np.zeros(self.n_classes).astype(np.float32)
+            #onehot[self.classes[index]] = 1.0
+            #target = np.concatenate([onehot, hs])
+            target = [self.classes[index], hs]
+        else:
+            target = hs
+        return sample, target
 
     def __len__(self) -> int:
         return self.n_samples
@@ -144,3 +159,61 @@ def default_loader(path: str) -> Any:
         return accimage_loader(path)
     else:
         return pil_loader(path)
+
+
+def find_classes(directory: str) -> Tuple[List[str], Dict[str, int]]:
+    """Finds the class folders in a dataset.
+
+    See :class:`DatasetFolder` for details.
+    """
+    classes = sorted(entry.name for entry in os.scandir(directory) if entry.is_dir())
+    if not classes:
+        print("Couldn't find any class folder in ", directory)
+        classes = ["."]
+        class_to_idx = {".": 0}
+    else:
+        class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
+    return classes, class_to_idx
+
+def has_file_allowed_extension(filename: str, extensions: Tuple[str, ...]) -> bool:
+    return filename.lower().endswith(extensions)
+
+def make_dataset(
+    directory: str,
+) -> List[Tuple[str, int]]:
+
+    directory = os.path.expanduser(directory)
+    _, class_to_idx = find_classes(directory)
+
+    extensions = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
+    def is_valid_file(x: str) -> bool:
+        return has_file_allowed_extension(x, cast(Tuple[str, ...], extensions))
+
+    is_valid_file = cast(Callable[[str], bool], is_valid_file)
+
+    paths = []
+    classes = []
+    available_classes = set()
+    for target_class in sorted(class_to_idx.keys()):
+        class_index = class_to_idx[target_class]
+        target_dir = os.path.join(directory, target_class)
+        if not os.path.isdir(target_dir):
+            continue
+        for root, _, fnames in sorted(os.walk(target_dir, followlinks=True)):
+            for fname in sorted(fnames):
+                path = os.path.join(root, fname)
+                if is_valid_file(path):
+                    paths.append(path)
+                    classes.append(class_index)
+
+                    if target_class not in available_classes:
+                        available_classes.add(target_class)
+
+    empty_classes = set(class_to_idx.keys()) - available_classes
+    if empty_classes:
+        msg = f"Found no valid file for the classes {', '.join(sorted(empty_classes))}. "
+        if extensions is not None:
+            msg += f"Supported extensions are: {', '.join(extensions)}"
+        raise FileNotFoundError(msg)
+
+    return paths,classes

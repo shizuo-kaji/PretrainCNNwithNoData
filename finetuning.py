@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 import time
 import random
-import os
+import os,sys,shutil
 import json
 from datetime import datetime as dt
+import socket
 
 import torch
 import torch.nn as nn
@@ -18,10 +19,12 @@ import torchvision.datasets as datasets
 from arguments import arguments
 from model_select import model_select
 from train_val import train, validate
+from dataset import DatasetFolderPH
 
 from torch.utils.tensorboard import SummaryWriter
 
 args = arguments()
+val_rec = [] # record accuracy
 
 def worker_init_fn(worker_id):
     random.seed(worker_id+args.seed)
@@ -48,23 +51,43 @@ def dpp_train(rank, world_size, args):
 
     # training dataset
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    train_transform = transforms.Compose([
-                        transforms.Resize(args.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
-                        transforms.RandomResizedCrop(args.crop_size,scale=(0.8,1.0),ratio=(0.9,1.1)),
-                        #transforms.RandomCrop(args.crop_size),
-                        transforms.RandomHorizontalFlip(),
-                        transforms.ToTensor(),
-                        normalize])
-    train_dataset = datasets.ImageFolder(args.train, transform=train_transform)
-    if args.pidf in ["nccl","gloo"]:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset,num_replicas=world_size,rank = rank)
-        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, 
-                                                    num_workers=args.num_workers, pin_memory=True, drop_last=True, worker_init_fn=worker_init_fn, sampler = train_sampler)
+    if args.random_scale == 0:
+        train_transform = transforms.Compose([
+                            transforms.Resize(args.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
+                            transforms.RandomCrop(args.crop_size),
+                            transforms.RandomHorizontalFlip(),
+                            transforms.ToTensor(),
+                            normalize])
     else:
-        train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=args.batch_size,
-                                                shuffle=True, num_workers=args.num_workers,
-                                                pin_memory=True, drop_last=True, worker_init_fn=worker_init_fn)
-    
+        train_transform = transforms.Compose([
+                            transforms.Resize(args.img_size, interpolation=transforms.InterpolationMode.BILINEAR),
+                            transforms.RandomResizedCrop(args.crop_size,scale=(1.0-3*args.random_scale,1.0)),
+                            #transforms.RandomResizedCrop(args.crop_size,scale=(1.0-2*args.random_scale,1.0),ratio=(1.0-args.random_scale,1.0+args.random_scale)),
+                            transforms.RandomHorizontalFlip(),
+                            transforms.ToTensor(),
+                            normalize])
+    if args.learning_mode == "simultaneous":
+        train_datasets = [DatasetFolderPH(args.train, transform=train_transform, args=args, PH_vect_dim=args.numof_classes2)]
+        print(len(train_datasets[0]), "first train images loaded (used for both classification and PH regression).")
+    else:
+        train_datasets = [datasets.ImageFolder(args.train, transform=train_transform)]
+        print(len(train_datasets[0]), "first train images loaded.")
+    if args.train2 is not None and args.learning_mode != "simultaneous":
+        train_datasets.append(DatasetFolderPH(args.train2, transform=train_transform, args=args, PH_vect_dim=args.numof_classes2))
+        print(len(train_datasets[0]), len(train_datasets[1]), "first and second train images loaded.")
+    print("number of classes: ", len(train_datasets[0].classes))
+
+    if args.pidf in ["nccl","gloo"]:
+        train_samplers = [torch.utils.data.distributed.DistributedSampler(train_datasets[0],num_replicas=world_size,rank = rank)]
+        train_loaders = [torch.utils.data.DataLoader(train_datasets[0], batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=True, drop_last=True, worker_init_fn=worker_init_fn, sampler = train_samplers[0])]
+        if args.train2 is not None and args.learning_mode != "simultaneous":
+            train_samplers.append(torch.utils.data.distributed.DistributedSampler(train_datasets[1],num_replicas=world_size,rank = rank))
+            train_loaders.append(torch.utils.data.DataLoader(train_datasets[1], batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=True, drop_last=True, worker_init_fn=worker_init_fn, sampler = train_samplers[1]))
+    else:
+        train_loaders = [torch.utils.data.DataLoader(dataset=train_datasets[0], batch_size=args.batch_size,shuffle=True, num_workers=args.num_workers,pin_memory=True, drop_last=True, worker_init_fn=worker_init_fn)]
+        if args.train2 is not None and args.learning_mode != "simultaneous":
+            train_loaders.append(torch.utils.data.DataLoader(dataset=train_datasets[1], batch_size=args.batch_size,shuffle=True, num_workers=args.num_workers,pin_memory=True, drop_last=True, worker_init_fn=worker_init_fn))
+
     # validation dataset
     if rank==0:
         test_transform = transforms.Compose([
@@ -72,15 +95,27 @@ def dpp_train(rank, world_size, args):
                             transforms.CenterCrop(args.crop_size),
                             transforms.ToTensor(),
                             normalize])
-        if not args.val:
-            args.val=args.train.replace('train','val')
-        test_dataset = datasets.ImageFolder(args.val,test_transform)
-        test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=args.batch_size,
+        if args.learning_mode == "simultaneous":
+            test_datasets = [DatasetFolderPH(args.val, transform=test_transform,args=args, PH_vect_dim=args.numof_classes2)]
+        else:
+            test_datasets = [datasets.ImageFolder(args.val,test_transform)]
+        test_loaders = [torch.utils.data.DataLoader(dataset=test_datasets[0], batch_size=args.batch_size,
                                                 shuffle=False, num_workers=args.num_workers,
-                                                pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn)
-
+                                                pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn)]
+        print(len(test_datasets[0]), "first validation images loaded.")
+        if args.train2 is not None and args.learning_mode != "simultaneous":
+            test_datasets.append(DatasetFolderPH(args.val2, transform=test_transform,args=args, PH_vect_dim=args.numof_classes2))
+            test_loaders.append(torch.utils.data.DataLoader(test_datasets[1], batch_size=args.batch_size, shuffle=False,
+                                                 num_workers=args.num_workers, pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn))
+            print(len(test_datasets[1]), "second validation images loaded.")
     # setup model and optimiser
-    criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
+    criterions = [nn.CrossEntropyLoss(reduction='mean').to(device)]
+    if args.learning_mode != "single":
+        parts = [(0,args.numof_classes),(args.numof_classes,args.numof_classes+args.numof_classes2)]
+        criterions.append(nn.MSELoss(reduction='mean').to(device))
+    else:
+        parts = [None]
+
     model = model_select(args)
     if args.world_size != 1:
         if args.pidf in ["nccl","gloo"]:
@@ -101,7 +136,8 @@ def dpp_train(rank, world_size, args):
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
         print("using cosine annealing.")
     else:
-        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[args.epochs//3,2*args.epochs//3], gamma=0.1)
+        print("LR drops at: ", [(i+1) * args.epochs//args.lr_drop for i in range(args.lr_drop-1)])
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[(i+1) * args.epochs//args.lr_drop for i in range(args.lr_drop-1)], gamma=0.1)
 
     # logger
     if rank==0:
@@ -127,18 +163,42 @@ def dpp_train(rank, world_size, args):
 
     # Training and Validation
     for epoch in range(1, args.epochs + 1):
-        if args.pidf in ["nccl","gloo"]:
-            train_sampler.set_epoch(epoch)
-            loss, acc = train(args, model, rank, train_loader, optimizer, epoch, criterion)
-        else:
-            loss, acc = train(args, model, device, train_loader, optimizer, epoch, criterion)
+        if args.learning_mode != "simultaneous":
+            for i in range(len(criterions)):
+                if args.pidf in ["nccl","gloo"]:
+                    train_samplers[i].set_epoch(epoch)
+                    loss, acc, _ = train(args, model, rank, train_loaders[i], optimizer, epoch, [criterions[i]], part=parts[i])
+                else:
+                    loss, acc, _ = train(args, model, device, train_loaders[i], optimizer, epoch, [criterions[i]], part=parts[i])
+                if rank == 0:
+                    validation_loss, validation_accuracy, _ = validate(args, model, device, test_loaders[i], [criterions[i]], part=parts[i])
+                    if i==0:
+                        val_rec.append(validation_accuracy)
+                        writer.add_scalar("Loss/train", loss, epoch)
+                        writer.add_scalar("Acc/train", acc, epoch)
+                        writer.add_scalar("Loss/val", validation_loss, epoch)
+                        writer.add_scalar("Acc/val", validation_accuracy, epoch)
+                    else:
+                        writer.add_scalar("Loss/train2", loss, epoch)
+                        writer.add_scalar("Loss/val2", validation_loss, epoch)
+        else: #simultaneous
+            if args.pidf in ["nccl","gloo"]:
+                train_samplers[i].set_epoch(epoch)
+                loss, acc, loss2 = train(args, model, rank, train_loaders[0], optimizer, epoch, criterions, part=parts)
+            else:
+                loss, acc, loss2 = train(args, model, device, train_loaders[0], optimizer, epoch, criterions, part=parts)
+            if rank == 0:
+                validation_loss, validation_accuracy, validation_loss2 = validate(args, model, device, test_loaders[0], criterions, part=parts)
+                writer.add_scalar("Loss/train", loss, epoch)
+                writer.add_scalar("Acc/train", acc, epoch)
+                writer.add_scalar("Loss/val", validation_loss, epoch)
+                writer.add_scalar("Acc/val", validation_accuracy, epoch)
+                writer.add_scalar("Loss/train2", loss2, epoch)
+                writer.add_scalar("Loss/val2", validation_loss2, epoch)
+
+
+
         scheduler.step()
-        if rank == 0:
-            writer.add_scalar("Loss/train", loss, epoch)
-            writer.add_scalar("Acc/train", acc, epoch)
-            validation_loss, validation_accuracy = validate(args, model, device, test_loader, criterion)
-            writer.add_scalar("Loss/val", validation_loss, epoch)
-            writer.add_scalar("Acc/val", validation_accuracy, epoch)
         if (epoch % args.save_interval == 0 or epoch == args.epochs) and rank==0:
             print("saving checkpoint...")
             saved_weight = os.path.join(args.output, "ft_"+args.usenet+"_epoch"+ str(epoch) +".pth")
@@ -160,14 +220,28 @@ def dpp_train(rank, world_size, args):
         dist.destroy_process_group()
 
 if __name__== "__main__":
-    print(args)
+    if torch.cuda.device_count() > 1:
+        print(torch.cuda.device_count(), "GPUs available")
+    else:
+        args.world_size = 1
+
+    if args.learning_mode != "single":
+        args.world_size = 1
+        print("world size set to 1")
     dtstr = dt.now().strftime('%Y_%m%d_%H%M')
     if "CIFAR100" in args.train:
         dtstr += "_C100"
     elif "omniglot" in args.train:        
-        dtstr += "_omn"
-    args.logdir = os.path.join(os.path.dirname(__file__),"runs/{}".format(dtstr))
+        dtstr += "_OMN"
+    elif "FGADR" in args.train:
+        dtstr += "_FGADR"
+    else:
+        dtstr += "_rnd"
+    dtstr += "_"+args.suffix
+    args.logdir = os.path.join(os.path.dirname(__file__),"runs/{}/{}".format(socket.gethostname(),dtstr))
     args.output = os.path.join(os.path.expanduser(args.output), dtstr)
+    print(args)
+
     os.makedirs(args.output, exist_ok=True)
     os.makedirs(args.logdir, exist_ok=True)
     with open(os.path.join(args.output, "args.json"), mode="w") as f:
@@ -180,9 +254,6 @@ if __name__== "__main__":
     random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    if torch.cuda.device_count() > 1:
-        print(torch.cuda.device_count(), "GPUs available")
-
     starttime = time.time()
     if args.pidf in ["nccl","gloo"]:
         mp.spawn(dpp_train,args=(args.world_size,args,),nprocs=args.world_size,join=True)
@@ -192,3 +263,14 @@ if __name__== "__main__":
     endtime = time.time()
     interval = endtime - starttime
     print ("elapsed time = %dh %dm %ds" % (int(interval/3600),int((interval%3600)/60),int((interval%3600)%60)))
+    print(args.logdir)
+    with open(os.path.join(args.logdir,"args.txt"), 'w') as fh:
+        fh.write(" ".join(sys.argv))
+        fh.write(",".join([str(f) for f in val_rec]))
+
+    try:
+        source = os.path.join(os.path.dirname(args.path2weight),"args.json")
+        shutil.copyfile(source, os.path.join(args.logdir,"args_pt.json"))
+        shutil.copyfile(source, os.path.join(args.output,"args_pt.json"))
+    except:
+        pass 
