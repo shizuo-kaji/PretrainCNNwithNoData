@@ -18,8 +18,10 @@ class DoubleHeadLinear(torch.nn.Module):
         return torch.cat([y1,y2], dim=-1)
 
 # Model creation and weights initialisation
-def model_select(args):
+def model_select(args, outdim):
 	param, pretrained = False, False
+	train_from_scratch = False
+
 	if (args.path2weight == "imagenet"):
 		pretrained = True
 		args.numof_pretrained_classes = 1000
@@ -27,7 +29,8 @@ def model_select(args):
 	else:
 		if args.path2weight is None:
 			print("weight file {} not found: train from scratch!\n".format(args.path2weight))
-			args.numof_pretrained_classes = args.numof_classes
+			args.numof_pretrained_classes = outdim
+			train_from_scratch = True
 		elif os.path.exists(args.path2weight):
 			print ("use pretrained model : {}".format(args.path2weight))
 			param = torch.load(args.path2weight, map_location=lambda storage, loc: storage)
@@ -50,13 +53,17 @@ def model_select(args):
 	# stop updating the encoder part (only the last fc will be trained)
 	if args.freeze_encoder and param:
 		for param in model.parameters():
-			param.requires_grad = False	
-	# replace the last fc layer
-	if "resne" in args.usenet:
-		last_layer = nn.Linear(2048, args.numof_classes+args.numof_classes2)
-		model.fc = last_layer
-	elif "densenet" in args.usenet:
-		last_layer = nn.Linear(2208, args.numof_classes+args.numof_classes2)
-		model.classifier = last_layer
+			param.requires_grad = False
+	
+	if not train_from_scratch:
+		# replace the last fc layer
+		if "resne" in args.usenet:
+			in_dim = model.fc.in_features
+			last_layer = nn.Linear(in_dim, outdim)
+			model.fc = last_layer
+		elif "densenet" in args.usenet:
+			in_dim = model.classifier.in_features
+			last_layer = nn.Linear(in_dim, outdim)
+			model.classifier = last_layer
 
 	return model
