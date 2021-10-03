@@ -8,7 +8,7 @@ import os,glob
 import os.path
 from typing import Any, Callable, cast, Dict, List, Optional, Tuple
 import numpy as np
-from PHdict import comp_PH, hist_PH, life_curve, comp_persistence_image
+from PHdict import comp_PH, PH_hist, life_curve, comp_persistence_image, comp_landscape
 from scipy.fft import fft2, ifft2
 from skimage.filters import threshold_otsu
 
@@ -45,7 +45,7 @@ def generate_random_image(args):
             sample[i] = (sample[i]-sample[i].min())/np.ptp(sample[i])
     sample = Image.fromarray((255*sample).astype(np.uint8).transpose(1,2,0).squeeze())
     return sample
-    
+
 
 class DatasetFolderPH(VisionDataset):
     def __init__(
@@ -59,7 +59,7 @@ class DatasetFolderPH(VisionDataset):
         super(DatasetFolderPH, self).__init__(root, transform=transform)
 
         self.args = args
-        if root is None:
+        if root=="generate":
             self.generate_on_the_fly = True
             self.n_samples = args.n_samples
             self.classes = [0 for i in range(args.n_samples)]
@@ -82,21 +82,25 @@ class DatasetFolderPH(VisionDataset):
             self.loader = loader
 
         #bins = args.numof_classes if PH_vect_dim is None else PH_vect_dim
-        bins = args.numof_classes_pt
-        if args.label_type in ["PH_hist","life_curve","persistence_image"] and bins <= 0:
+        bins = args.numof_dims_pt
+        if args.label_type_pt in ["PH_hist","life_curve","persistence_image","landscape"] and bins <= 0:
             print("Wrong output dimension!")
             exit()
-        if self.args.label_type in ["life_curve","persistence_image"]:
+        if self.args.label_type_pt in ["life_curve","persistence_image","landscape"]:
             self.args.num_bins = [bins//2,bins-bins//2]
-        elif self.args.label_type == "PH_hist":
-            b = bins//4
-            self.args.num_bins = [b,b,b,bins-3*b]
+        elif self.args.label_type_pt == "PH_hist":
+            if self.args.gradient:
+                b = bins//3
+                self.args.num_bins = [b,b,1,bins-2*b-1]
+            else:
+                b = bins//4
+                self.args.num_bins = [b,b,b,bins-3*b]
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
 
         if self.generate_on_the_fly:
             sample=generate_random_image(self.args).convert('RGB')
-        else:            
+        else:
             path = self.samples[index]
             sample = self.loader(path)
 
@@ -104,19 +108,21 @@ class DatasetFolderPH(VisionDataset):
         if self.args.persistence_after_transform and self.transform is not None:
             sample = self.transform(sample)
 
-        if self.args.label_type == "raw":
+        if self.args.label_type_pt == "raw":
             hs = np.load(os.path.join(self.args.path2PHdir, os.path.splitext(os.path.basename(path))[0]+".npy")).astype(np.float32)
         else:
             if self.args.path2PHdir:
                 ph = np.load(os.path.join(self.args.path2PHdir, os.path.splitext(os.path.basename(path))[0]+".npy"))
             else: # compute on the fly
                 ph = comp_PH(np.array(sample),gradient=self.args.gradient, distance_transform=self.args.distance_transform)
-            if self.args.label_type == "life_curve":
+            if self.args.label_type_pt == "life_curve":
                 hs = life_curve(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life).astype(np.float32)
-            elif self.args.label_type == "PH_hist":
-                hs = hist_PH(ph, self.args).astype(np.float32)
-            elif self.args.label_type == "persistence_image":
-                hs = comp_persistence_image(ph, self.args).astype(np.float32)       
+            elif self.args.label_type_pt == "landscape":
+                hs = comp_landscape(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life, n=2).astype(np.float32)
+            elif self.args.label_type_pt == "PH_hist":
+                hs = PH_hist(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life, bandwidth=self.args.bandwidth).astype(np.float32)
+            elif self.args.label_type_pt == "persistence_image":
+                hs = comp_persistence_image(ph, self.args).astype(np.float32)
             else:
                 print("Unknown label type")
                 exit()

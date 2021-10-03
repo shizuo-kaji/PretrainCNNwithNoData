@@ -104,7 +104,8 @@ def validate(args, model, device, val_loader, criterions, part=None):
 
             loss1 = criterions[0](output1, target1)
 
-            k = min(args.numof_classes,5)
+            #k = min(args.numof_classes,5)
+            k = 5
             if target1.dtype == torch.float32:
                 acc1, acc5 = [0], [0]
             else:

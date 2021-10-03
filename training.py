@@ -74,11 +74,10 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
     # training dataset
     train_data_path = args.train_pt if mode=="pretraining" else args.train
     val_data_path = args.val_pt if mode=="pretraining" else args.val
-    outdim = args.numof_classes_pt if mode=="pretraining" else args.numof_classes
 
     # training transform
     img_size = args.img_size_pt if mode=="pretraining" else args.img_size
-    if train_data_path is None or "random" in train_data_path:
+    if train_data_path=="generate" or "random" in train_data_path:
         normalize = transforms.Normalize(mean=[0.5,0.5,0.5], std=[0.32,0.32,0.32])
     else:
         #normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -98,43 +97,46 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
 
     # dataset loading
     if args.learning_mode == "simultaneous": # use a single dataset but with two tasks: classification and PH
-        train_datasets = [DatasetFolderPH(args.train, transform=train_transform, args=args)]
+        train_datasets = [DatasetFolderPH(train_data_path, transform=train_transform, args=args)]
         print(len(train_datasets[0]), "first train images loaded (used for both classification and PH regression).")
-        outdim = args.numof_classes+args.numof_classes_pt
-        parts = [(0,args.numof_classes),(args.numof_classes,outdim)]
+        numof_classes = train_datasets[0].n_classes
+        outdim = numof_classes+args.numof_dims_pt
+        parts = [(0,numof_classes),(numof_classes,outdim)]
         criterions=[nn.CrossEntropyLoss(reduction='mean').to(rank),nn.MSELoss(reduction='mean').to(rank)]
     else:
-        if args.label_type == "class" or mode == "finetuning":
+        if args.label_type_pt == "class" or mode == "finetuning":
             train_datasets = [datasets.ImageFolder(train_data_path, transform=train_transform)]
             print(len(train_datasets[0]), "first train images loaded from ", train_data_path)
-            print("number of classes: ", len(train_datasets[0].classes))
+            outdim = len(train_datasets[0].classes)
+            print("number of classes: ", outdim)
             criterions = [nn.CrossEntropyLoss(reduction='mean').to(rank)]
-        else:
+        else: ## PH related tasks
             if os.path.isdir(args.path2PHdir):
                 print("PH will be loaded from: ",args.path2PHdir)
             else:
                 print("PH computed on the fly")
-            if train_data_path is None:
-                train_datasets = [DatasetFolderPH(root=None, transform=train_transform, args=args)]
+            if train_data_path=="generate":
+                train_datasets = [DatasetFolderPH(root="generate", transform=train_transform, args=args)]
                 print(len(train_datasets[0]), "training images are generated on the fly.")
             else:
                 train_datasets = [DatasetFolderPH(train_data_path, transform=train_transform, args=args)]
                 print(len(train_datasets[0]), "first train images loaded from ", train_data_path)
             criterions = [nn.MSELoss(reduction='mean').to(rank)]
-            print("regression dimension: ", args.numof_classes_pt)
+            outdim = args.numof_dims_pt
         # second dataset
         if args.learning_mode == "alternating":
-            train_datasets.append(DatasetFolderPH(args.train_pt, transform=train_transform, args=args, PH_vect_dim=args.numof_classes_pt))
+            train_datasets.append(DatasetFolderPH(args.train_pt, transform=train_transform, args=args, PH_vect_dim=args.numof_dims_pt))
             print(len(train_datasets[0]), len(train_datasets[1]), "first and second train images loaded.")
-            outdim = args.numof_classes+args.numof_classes_pt
-            parts = [(0,args.numof_classes),(args.numof_classes,outdim)]
+            numof_classes = train_datasets[0].n_classes
+            outdim = numof_classes+args.numof_dims_pt
+            parts = [(0,numof_classes),(numof_classes,outdim)]
             criterions.append(nn.MSELoss(reduction='mean').to(rank))
         else:
             parts = [None]
 
     # save transformed sample training images to file
     for i in range(args.output_training_images):
-        img = (train_dataset[i][0]).numpy()
+        img = (train_datasets[0][i][0]).numpy()
         img = (255*(img-img.min())/np.ptp(img)).astype(np.uint8).transpose(1,2,0)
         Image.fromarray(img).save(os.path.join(args.output,"{:0>5}.jpg".format(i)))
 
@@ -163,7 +165,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
         test_transform.transforms.append(transforms.CenterCrop(args.crop_size))
         test_transform.transforms.append(transforms.ToTensor())
         test_transform.transforms.append(normalize)
-        if args.label_type == "class" or mode == "finetuning":
+        if args.label_type_pt == "class" or mode == "finetuning":
             test_datasets = [datasets.ImageFolder(val_data_path, transform=test_transform)]
         else:
             test_datasets = [DatasetFolderPH(val_data_path, transform=test_transform,args=args)]
@@ -171,13 +173,14 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
                                                  num_workers=args.num_workers, pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn)]
         print(len(test_datasets[0]), "first validation images loaded.")
         if args.learning_mode == "alternating":
-            test_datasets.append(DatasetFolderPH(args.val_pt, transform=test_transform,args=args, PH_vect_dim=args.numof_classes_pt))
+            test_datasets.append(DatasetFolderPH(args.val_pt, transform=test_transform,args=args, PH_vect_dim=args.numof_dims_pt))
             test_loaders.append(torch.utils.data.DataLoader(test_datasets[1], batch_size=args.batch_size, shuffle=False,
                                                  num_workers=args.num_workers, pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn))
             print(len(test_datasets[1]), "second validation images loaded.")
 
     # setup model and optimiser
     model = model_select(args, outdim)
+    print("NN output dimension: ", outdim)
     if args.world_size != 1:
         if args.pidf in ["nccl","gloo"]:
             model = DDP(model.to(rank), device_ids=[rank],output_device=rank)
@@ -289,11 +292,18 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
 
 if __name__== "__main__":
 
-    grd ="grad_" if args.gradient else ""
-    dtstr = dt.now().strftime('%Y_%m%d_%H%M_{}{}_ml{}_n{}'.format(grd,args.label_type,args.max_life,args.numof_classes_pt))
+    dtstr = dt.now().strftime('%Y_%m%d_%H%M')
+    if args.learning_mode == "finetuning":
+        dtstr += "_finetuning"
+    else:
+        grd ="grad_" if args.gradient else ""
+        if args.label_type_pt != 'class':
+            dtstr += '_{}{}_ml{}_n{}'.format(grd,args.label_type_pt,args.max_life[0],args.numof_dims_pt)
+        else:
+            dtstr += '_{}{}'.format(grd,args.label_type_pt)
     if args.dataset_name:
         dtstr += "_"+args.dataset_name
-    if args.dataset_name_pt:
+    if args.dataset_name_pt and args.learning_mode != "finetuning":
         dtstr += "_"+args.dataset_name_pt
     if args.suffix:
         dtstr += "_"+args.suffix

@@ -9,17 +9,17 @@ import matplotlib.pyplot as plt
 from scipy.ndimage.morphology import distance_transform_edt
 from skimage.filters import threshold_otsu
 from PIL import Image
-import os
+import os,json
 from tqdm import tqdm
 import argparse
 from multiprocessing import Pool
 from functools import partial
 from dataset import generate_random_image
 
-def generate_and_save_random_image(idx, args=None, outdir=None):
+def generate_and_save_random_image(idx, args=None, outdir=None, prefix=""):
     #np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
     sample = generate_random_image(args)
-    sample.save(os.path.join(outdir,"{}{:0>8}.jpg".format(args.prefix,idx)))
+    sample.save(os.path.join(outdir,"{}{:0>8}.jpg".format(prefix,idx)))
 
 #%%
 if __name__== "__main__":
@@ -38,17 +38,23 @@ if __name__== "__main__":
     parser.add_argument("--prob_binary", '-pb', default=0.5, type = float, help="probability of binarising the generated image")
     args = parser.parse_args()
 
+    os.makedirs(args.output, exist_ok=True)
+    with open(os.path.join(args.output, "args.json"), mode="w") as f:
+        json.dump(args.__dict__, f, indent=4)
+
     if args.n_samples_val > 0:
         phases = ["train","val"]
+        prefix = ["t","v"]
         nsmp = [args.n_samples,args.n_samples_val]
     else:
         phases = ["."]
+        prefix = [args.prefix]
         nsmp = [args.n_samples]
     for k,phase in enumerate(phases):
         n = nsmp[k]
         outdir = os.path.join(args.output,phase)
         os.makedirs(outdir, exist_ok=True)
-        task = partial(generate_and_save_random_image, args=args, outdir=outdir)
+        task = partial(generate_and_save_random_image, args=args, outdir=outdir, prefix=prefix[k])
         if args.num_workers>1:
             pool = Pool(args.num_workers)
             #with ProcessPoolExecutor(args.batch) as executor:

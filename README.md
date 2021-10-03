@@ -45,17 +45,17 @@ MIT Licence
 
     % pip install git+https://github.com/shizuo-kaji/CubicalRipser_3dim
 
-## Training data generation
+## Synthetic Training data generation
 Training data can be generated on the fly, but for the efficiency,
 we recommend to precompute training images and their persistent homology.
 
-    % python random_image.py -pb 0.5 -pc 0.5 --prefix t -o random -n 50000
+    % python random_image.py -pb 0.5 -pc 0.5 -o random -n 50000 -nv 5000
 
 generates 50000 images (-n 50000) under the directory `random` (-o random). 
-Half of them (-pc 0.5) are colour and the rest is grayscale.
+Half of them (-pc 0.5) are colour and the rest are grayscale.
 Half of them (-pb 0.5) are binarised.
 
-## Precomuting persistent homology
+## Precomputing persistent homology
 The following computes the persistent homology
 
     % python PHdict.py random -o PH_random -it jpg
@@ -67,14 +67,14 @@ Note that instead of synthesised images, we can use any image dataset (e.g., Ima
 
 ## Model pre-training
 
-    % python training.py -o 'weights' --numof_classes=200 --label_type PH_hist -t2 'random' -pd PH_random -u 'resnet50' --max_life 80 --max_birth 80 --bandwidth 2 -lm 'pretraining'
+    % python training.py --numof_dims_pt=200 --label_type PH_hist -t 'random' -pd PH_random -u 'resnet50' --max_life 80 --max_birth 80 --bandwidth 2 -lm 'pretraining'
 
 You will find a pretrained weight file (e.g., `resnet50_pt_epoch90.pth`) under the directory 'result/XX', where XX is automatically generated from the date.
 Different types of persistent-homology-based labelling can be specified, for example, by (--label_type 'persistence_image').
 
-If you wish to generate training images and labels on the fly (not efficient), do not specify the training images (i.e., do not use -t):
+If you wish to generate training images and labels on the fly (not efficient),
 
-    % python training.py -o 'weights' --numof_classes=200 --label_type PH_hist -pd PH_random -u 'resnet50' --alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5 -n 50000 -lm 'pretraining'
+    % python training.py --numof_dims_pt=200 --label_type PH_hist -t 'generate' -u 'resnet50' --alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5 -n 50000 --max_life 80 --max_birth 80 --bandwidth 2 -lm 'pretraining'
 
 The arguments (--alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5) are parameters for image generation. 
 In each epoch, 50000 (-n 50000) images are generated.
@@ -85,7 +85,7 @@ The pretraining code saves the weights in a standard PyTorch model format, so yo
 
 Alternatively, we provide a code for finetuning
 
-    % python training.py -t 'data/CIFAR100/train' -val 'data/CIFAR100/test' -pw 'weights/XX/resnet50_pt_epoch90.pth' -o 'result' -nc 100 -e 90 -lm 'finetuning'
+    % python training.py -t 'data/CIFAR100/train' -val 'data/CIFAR100/test' -pw 'weights/XX/resnet50_pt_epoch90.pth' -o 'result' -e 90 -lm 'finetuning'
 
 The CIFAR100 dataset can be obtained by the [script](https://github.com/chatflip/ImageRecognitionDataset) (included in this repository as well)
 
@@ -95,10 +95,12 @@ The CIFAR100 dataset can be obtained by the [script](https://github.com/chatflip
 ## Experiments on the accuracy improvement in image classification tasks
 
 ![C100](https://github.com/shizuo-kaji/PretrainCNNwithNoData/blob/master/demo/C100.jpg?raw=true)
-![C100](https://github.com/shizuo-kaji/PretrainCNNwithNoData/blob/master/demo/omniglot.jpg?raw=true)
 
-The graph shows the classification accuracies of the CIFAR100 and the [Omniglot](https://github.com/brendenlake/omniglot) dataset 
+The graph shows the classification accuracies of the CIFAR100 dataset 
 with models pretrained in different datasets and tasks.
+Note that the purpose of the experiment is to show the effectiveness of our method but not to maximise the performance.
+So the hyper-parameters are fixed (not optimised) and the performances with different pretraining conditions are compared.
+
 The naming convention used in the graphs is PROBLEM_DATASET_TASK, where
 - PROBLEM is either C100 (CIFAR100) or OMN (Omniglot).
 - scratch indicates without any pretraining (random initialisation)
@@ -113,8 +115,3 @@ PH means the regression of persistent homology as above.
 
 For the natural image classification (CIFAR100), the ImageNet pretrained model outperforms others by a large margin.
 Still, it is notable that our method (gen_PH) is far better than learning from scratch.
-
-For the one-shot learning of hand-written character classification (Omniglot), our method (gen_PH) outperforms the ImageNet pretrained model. 
-Omniglot consists of one training image and 19 test images per character so that human-like shape recognition is required to perform the classification task.
-We speculate that the topological feature learned with our method is better generalisable to this kind of tasks.
-
