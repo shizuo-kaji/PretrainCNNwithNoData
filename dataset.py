@@ -98,23 +98,26 @@ class DatasetFolderPH(VisionDataset):
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
 
+        # input image generation/loading
         if self.generate_on_the_fly:
             sample=generate_random_image(self.args).convert('RGB')
         else:
             path = self.samples[index]
             sample = self.loader(path)
 
-        # apply image transform; if path2PHdir is set, then PH will be loaded from file and thus the order of transform does not matter.
+        # apply image transform; if path2PHdir is set, then PH will be loaded from file and thus the timing of transform does not matter.
         if self.args.persistence_after_transform and self.transform is not None:
             sample = self.transform(sample)
 
         if self.args.label_type_pt == "raw":
             hs = np.load(os.path.join(self.args.path2PHdir, os.path.splitext(os.path.basename(path))[0]+".npy")).astype(np.float32)
         else:
-            if self.args.path2PHdir:
-                ph = np.load(os.path.join(self.args.path2PHdir, os.path.splitext(os.path.basename(path))[0]+".npy"))
-            else: # compute on the fly
+            # PH
+            if self.args.path2PHdir == "on_the_fly":
                 ph = comp_PH(np.array(sample),gradient=self.args.gradient, distance_transform=self.args.distance_transform)
+            else:
+                ph = np.load(os.path.join(self.args.path2PHdir, os.path.splitext(os.path.basename(path))[0]+".npy"))
+            # PH vectorisation
             if self.args.label_type_pt == "life_curve":
                 hs = life_curve(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life).astype(np.float32)
             elif self.args.label_type_pt == "landscape":
@@ -122,14 +125,17 @@ class DatasetFolderPH(VisionDataset):
             elif self.args.label_type_pt == "PH_hist":
                 hs = PH_hist(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life, bandwidth=self.args.bandwidth).astype(np.float32)
             elif self.args.label_type_pt == "persistence_image":
-                hs = comp_persistence_image(ph, self.args).astype(np.float32)
+                hs = np.concatenate(comp_persistence_image(ph, self.args)).astype(np.float32)
             else:
                 print("Unknown label type")
                 exit()
     #        print(hs.shape, hs.max())
 
+        # apply image transform
         if (not self.args.persistence_after_transform) and self.transform is not None:
             sample = self.transform(sample)
+
+        # return values
         if self.args.learning_mode == "simultaneous":
             #onehot = np.zeros(self.n_classes).astype(np.float32)
             #onehot[self.classes[index]] = 1.0
@@ -175,7 +181,7 @@ def find_classes(directory: str) -> Tuple[List[str], Dict[str, int]]:
     """
     classes = sorted(entry.name for entry in os.scandir(directory) if entry.is_dir())
     if not classes:
-        print("Couldn't find any class folder in ", directory)
+        #print("Couldn't find any class folder in ", directory)
         classes = ["."]
         class_to_idx = {".": 0}
     else:

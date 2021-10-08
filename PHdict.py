@@ -70,6 +70,12 @@ def comp_save_persistence_image(fname, args=None):
         sns.lineplot(x=np.arange(len(pims[1])),y=pims[1], legend="full",style=True, dashes=[(2,2)])
         plt.savefig(os.path.join(args.output, bfn+"_persImg.jpg"))
         plt.close()
+        # plt.imshow(pims[0].reshape(10,5))
+        # plt.savefig(os.path.join(args.output, bfn+"_persImg0.jpg"))
+        # plt.close()           
+        # plt.imshow(pims[1].reshape(10,5))
+        # plt.savefig(os.path.join(args.output, bfn+"_persImg1.jpg"))
+        # plt.close()           
     return(pims)
 
 def comp_landscape(ph,  dim, min_birth=None, max_birth=None, max_life=None,n=2):
@@ -89,11 +95,14 @@ def comp_persistence_image(ph, args=None):
         p = (ph[ph[:,0]==d])[:,1:3]
         life = p[:,1]-p[:,0]
         life = np.clip(life,a_min=None,a_max=args.max_life[d])
-        p[:,1] = life
-        pi = pim.transform(p).ravel()
+        #p[:,1] = life
+        pi = pim.transform(p)
+        #print(pi.shape)
+        pi = pi.ravel()
         pi = np.pad(pi,(0,args.num_bins[d]))[:args.num_bins[d]]
+        #pi = np.sqrt(np.abs(pi))
         pims.append(pi.astype(np.float32))
-    return(np.concatenate(np.sqrt(np.abs(pims))))
+    return(pims)
 
 def life_curve(ph, dim, min_birth=None, max_birth=None, max_life=None):
     res = []
@@ -162,7 +171,7 @@ def kern_smooth(y, bandwidth=11, kern='flat'):
 if __name__== "__main__":
     parser = argparse.ArgumentParser("")
     parser.add_argument('target_dir',type=str)
-    parser.add_argument('--output', '-o', default='output')
+    parser.add_argument('--output', '-o', default=None)
     parser.add_argument('--max_life', '-ml', type=int, nargs=2, default=[50,50])
     parser.add_argument('--max_birth', '-maxb', type=int, nargs=2, default=None)
     parser.add_argument('--min_birth', '-minb', type=int, nargs=2, default=None)
@@ -170,7 +179,7 @@ if __name__== "__main__":
     parser.add_argument('--bandwidth', '-b', type=int, default=1)
     parser.add_argument('--persImg_sigma', '-s', type=float, default=100)
     parser.add_argument('--imgtype', '-it', type=str, default="jpg")
-    parser.add_argument('--type', '-t', type=str, help="type of label")
+    parser.add_argument('--type', '-t', type=str, choices=['raw','life_curve','PH_hist','persistence_image','landscape','class'], help="type of label")
     parser.add_argument("--num_workers", '-nw', default=8, type = int, help="num of workers (data_loader)")
     parser.add_argument('--save_fig', '-sf', action="store_true", help="save graphs")
     parser.add_argument('--distance_transform', '-dt', action="store_true", default=True, help="apply distance transform")
@@ -186,6 +195,17 @@ if __name__== "__main__":
             args.min_birth = [0,0]
         else:
             args.min_birth = [-args.max_life[0],-args.max_life[1]]
+    
+    if args.output is None:
+        dn1,dn2 = os.path.split((os.path.normpath(args.target_dir))) # the leaf name
+        phdn = os.path.join(dn1,"PH_"+dn2)
+        if os.path.isdir(phdn):
+            print("Please specify output directory!")
+            exit()
+        else:
+            args.output = phdn
+            print("output will be saved under: ", args.output)
+
     ###
     print(args)
     target_dir = args.target_dir

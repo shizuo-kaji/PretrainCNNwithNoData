@@ -10,7 +10,7 @@ def arguments():
     parser.add_argument("--train_pt", '-t2', default=None, type = str, help="path to training images for pre-training (set to generate for on-the-fly generation")
     parser.add_argument("--val_pt", '-v2', default=None, type = str, help="path to validation images for pre-training")
     parser.add_argument("--learning_mode", '-lm', default="combined", type = str, choices=["pretraining","finetuning","combined","alternating","simultaneous"], help="How two tasks and datasets are used for learning")
-    parser.add_argument("--path2PHdir", '-pd', default="", type = str, help="path to precomputed PH npy files")
+    parser.add_argument("--path2PHdir", '-pd', default=None, type = str, help="path to precomputed PH npy files")
     parser.add_argument("--path2weight", '-pw', default=None, type = str, help="path to trained weight (set to imagenet for ImageNet pretrained)")
     parser.add_argument("--output", '-o', default="result", type = str, help="path to output files")
     parser.add_argument("--suffix", '-sf', default="", type = str, help="suffix to the output dir name (for making memo)")
@@ -25,7 +25,7 @@ def arguments():
     parser.add_argument("--prob_binary", '-pb', default=0.5, type = float, help="probability of binarising the generated image")
     parser.add_argument("--prob_colour", '-pc', default=0.5, type = float, help="probability of generating colour images")
     # persistent homology (label) parameter
-    parser.add_argument("--max_life", '-ml', default=[40,40], type = int, nargs=2, help="maximum life time of each dimension for PH regression")
+    parser.add_argument("--max_life", '-ml', default=[80,80], type = int, nargs=2, help="maximum life time of each dimension for PH regression")
     parser.add_argument("--max_birth", '-maxb', default=None, type = int, nargs=2, help="maximum birth time of each dimension for PH regression")
     parser.add_argument('--min_birth', '-minb', type=int, default=None, nargs=2, help="minimum birth time of each dimension for PH regression")
     parser.add_argument('--affine', '-aff', default=False, action='store_true', help='apply random affine transformation')
@@ -82,11 +82,7 @@ def arguments():
             args.min_birth = [0,0]
         else:
             args.min_birth = [-args.max_life[0],-args.max_life[1]]
-
-    # if PH is not precomputed, compute PH after transformation
-    if args.path2PHdir is None:
-        args.persistence_after_transform = True
-
+        
     # choose the latest weight file in the specified dir
     if args.path2weight is not None and os.path.isdir(args.path2weight):
         fns = sorted(glob.glob(os.path.join(args.path2weight,'*.pth')), key=lambda f: os.stat(f).st_mtime, reverse=True)
@@ -98,7 +94,7 @@ def arguments():
     if args.train is not None:
         if not "train" in args.train and os.path.isdir(os.path.join(args.train,"train")):
             args.train = os.path.join(args.train,"train")
-        dn = os.path.split(os.path.dirname(os.path.normpath(args.train)))[1]
+        dn = os.path.split(os.path.dirname(os.path.normpath(args.train)))[1] ## the second dir name from the leaf (that is, excluding "train")
         #print(os.path.dirname(os.path.normpath(args.train)))
         args.dataset_name = dn if dn else None
         if not args.val:
@@ -123,12 +119,24 @@ def arguments():
         args.train_pt = args.train
         args.val_pt = args.val
 
-
-    if args.path2PHdir and args.persistence_after_transform:
+    # set PHdir automatically
+    if args.path2PHdir is None:
+        if not args.persistence_after_transform:
+            dn1,dn2 = os.path.split(os.path.dirname(os.path.normpath(args.train_pt)))
+            phdn = os.path.join(dn1,"PH_"+dn2)
+            if os.path.isdir(phdn):
+                args.path2PHdir = phdn
+            else:
+                args.path2PHdir = "on_the_fly"
+        else:
+            args.path2PHdir = "on_the_fly"
+    elif args.persistence_after_transform:
         #args.persistence_after_transform = False
-        print("loading pre-computed PH from path2PHdir and ersistence_after_transform are incompatible!")
+        print("loading pre-computed PH from path2PHdir and persistence_after_transform are incompatible!")
         exit()
-
+    elif not (os.path.isdir(args.path2PHdir) or args.path2PHdir == "on_the_fly"):
+        print("path2PHdir should be a directory name containing precomputed PH or 'on_the_fly' ")
+        exit()
 
     #os.environ['TORCH_WARN_ONCE'] = 'YES'
     return args

@@ -41,6 +41,7 @@ MIT Licence
 - a modern GPU
 - Python 3: [Anaconda](https://anaconda.org) is recommended
 - PyTorch >= 1.8
+- tensorboard
 - CubicalRipser: install by the following command
 
     % pip install git+https://github.com/shizuo-kaji/CubicalRipser_3dim
@@ -49,11 +50,12 @@ MIT Licence
 Training data can be generated on the fly, but for the efficiency,
 we recommend to precompute training images and their persistent homology.
 
-    % python random_image.py -pb 0.5 -pc 0.5 -o random -n 50000 -nv 5000
+    % python random_image.py -pb 0.5 -pc 0.5 --alpha_range 0.01 1 --beta_range 0.5 2 -o random -n 200000 -nv 5000
 
-generates 50000 images (-n 50000) under the directory `random` (-o random). 
+generates 200000 images (-n 200000) under the directory `random` (-o random). 
 Half of them (-pc 0.5) are colour and the rest are grayscale.
 Half of them (-pb 0.5) are binarised.
+alpha_range and beta_range are the frequency parameters.
 
 ## Precomputing persistent homology
 The following computes the persistent homology
@@ -63,29 +65,34 @@ The following computes the persistent homology
 of (the distance transform of the binarisation of) the jpeg images (-it jpg) under the directory `random` and outputs the results under `PH_random`.
 Optionally, the gradient is taken before applying the distance transform when (-g) is specified.
 
-Note that instead of synthesised images, we can use any image dataset (e.g., ImageNet).
+Note that we can use any image dataset (e.g., ImageNet) not restricted to synthetic images.
 
 ## Model pre-training
 
-    % python training.py --numof_dims_pt=200 --label_type PH_hist -t 'random' -pd PH_random -u 'resnet50' --max_life 80 --max_birth 80 --bandwidth 2 -lm 'pretraining'
+    % python training.py --numof_dims_pt=200 --label_type persistent_image -t 'random' -pd PH_random -u 'resnet50' --max_life 80 60 -lm 'pretraining'
 
 You will find a pretrained weight file (e.g., `resnet50_pt_epoch90.pth`) under the directory 'result/XX', where XX is automatically generated from the date.
-Different types of persistent-homology-based labelling can be specified, for example, by (--label_type 'persistence_image').
+Different types of persistent-homology-based labelling (vectorisation) can be specified, for example, by (--label_type 'life_curve').
+The 0-dimensional (resp. 1-dimensional) homology cycles with life time up to 80 (resp. 60) will be used for the labelling ('--max_life 80 60').
+The label will be 200 dimensional (--numof_dims_pt=200).
 
 If you wish to generate training images and labels on the fly (not efficient),
 
-    % python training.py --numof_dims_pt=200 --label_type PH_hist -t 'generate' -u 'resnet50' --alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5 -n 50000 --max_life 80 --max_birth 80 --bandwidth 2 -lm 'pretraining'
+    % python training.py --numof_dims_pt=200 --label_type persistent_image -t 'generate' -u 'resnet50' --alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5 -n 50000 --max_life 80 80 -lm 'pretraining'
 
 The arguments (--alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5) are parameters for image generation. 
 In each epoch, 50000 (-n 50000) images are generated.
 
 ## Model fine-tuning
 The pretrained model can be fine-tuned for any downstream tasks.
-The pretraining code saves the weights in a standard PyTorch model format, so you can use your own code to load the pretrained model.
+The pretraining code saves the weights in a standard PyTorch model format (e.g., 'result/XX/resnet50_pt_epoch90.pth'), 
+so you can use your own code to load the pretrained model.
 
-Alternatively, we provide a code for finetuning
+Our code can be used for finetuning as well.
+(Note that our code does not aim at achieving high performance for downstream tasks.
+It has very basic features which is suitable only for performance comparison):
 
-    % python training.py -t 'data/CIFAR100/train' -val 'data/CIFAR100/test' -pw 'weights/XX/resnet50_pt_epoch90.pth' -o 'result' -e 90 -lm 'finetuning'
+    % python training.py -t 'data/CIFAR100/train' -val 'data/CIFAR100/test' -pw 'result/XX/resnet50_pt_epoch90.pth' -o 'result' -e 90 -lm 'finetuning'
 
 The CIFAR100 dataset can be obtained by the [script](https://github.com/chatflip/ImageRecognitionDataset) (included in this repository as well)
 

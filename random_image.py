@@ -30,7 +30,7 @@ if __name__== "__main__":
     # image generator
     parser.add_argument("--alpha_range", '-ar', default=[0.01,1], type = float, nargs=2, help="")
     parser.add_argument("--beta_range", '-br', default=[0.5,2], type = float, nargs=2, help="")
-    parser.add_argument("--n_samples", '-n', default=50000, type = int, help="number of images")
+    parser.add_argument("--n_samples", '-n', default=200000, type = int, help="number of images")
     parser.add_argument("--n_samples_val", '-nv', default=5000, type = int, help="number of images for validation")
     parser.add_argument("--img_size", '-is', default=256, type = int, help="image size")
     parser.add_argument("--num_workers", '-nw', default=8, type = int, help="num of workers")

@@ -250,7 +250,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
                         exp.logger.add_scalar("Loss/val2", validation_loss, epoch)
         else: #simultaneous
             if args.pidf in ["nccl","gloo"]:
-                train_samplers[i].set_epoch(epoch)
+                train_samplers[0].set_epoch(epoch)
                 loss, acc, loss2 = train(args, model, rank, train_loaders[0], optimizer, epoch, criterions, part=parts)
             else:
                 loss, acc, loss2 = train(args, model, device, train_loaders[0], optimizer, epoch, criterions, part=parts)
