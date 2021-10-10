@@ -53,7 +53,6 @@ class DatasetFolderPH(VisionDataset):
             root: str,
             loader: Callable[[str], Any] = None,
             transform: Optional[Callable] = None,
-            #PH_vect_dim = None, # if set, used as the output dimension for PH regression, if not set, args.numof_classes is used instead
             args = None
     ) -> None:
         super(DatasetFolderPH, self).__init__(root, transform=transform)
@@ -80,21 +79,6 @@ class DatasetFolderPH(VisionDataset):
             self.loader = default_loader
         else:
             self.loader = loader
-
-        #bins = args.numof_classes if PH_vect_dim is None else PH_vect_dim
-        bins = args.numof_dims_pt
-        if args.label_type_pt in ["PH_hist","life_curve","persistence_image","landscape"] and bins <= 0:
-            print("Wrong output dimension!")
-            exit()
-        if self.args.label_type_pt in ["life_curve","persistence_image","landscape"]:
-            self.args.num_bins = [bins//2,bins-bins//2]
-        elif self.args.label_type_pt == "PH_hist":
-            if self.args.gradient:
-                b = bins//3
-                self.args.num_bins = [b,b,1,bins-2*b-1]
-            else:
-                b = bins//4
-                self.args.num_bins = [b,b,b,bins-3*b]
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
 

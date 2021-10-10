@@ -1,26 +1,26 @@
-# Pretraining of CNN without data
+# Teaching topology to CNN by pretraining with persistent homology
 by Shizuo Kaji, 2021
+
+A scheme is presented for pretraining deep neural networks 
+with synthetic images and mathematically defined labels that captures 
+topological information in images.
+The pretrained models can be finetuned for image classification tasks
+to achieve an improved performance compared to those models trained from the scratch.
+
+Convolutional neural networks, built upon iterative local operation, 
+are better at learning local features of the image such as texture,
+while our method provides an easy way to encourage them to learn global features.
+Furthermore, our method requires no real images nor manual labels,
+eliminating the concern related to data collection and annotation 
+including the cost of manual labour and fairness issues.
 
 With mathematically generated images annotated with mathematically defined labels,
 this code trains any CNN with no images nor labels, that is, completely in an unsupervised manner.
-The obtained model can be fine-tuned for any tasks (transfer learning).
 
-The code also works with any image dataset without labels; in this case, only labels are mathematically generated.
-
-This is a companion code for the paper "Pretraining Convolutional Neural Networks without Data" by Shizuo Kaji and
+This is a companion code for the paper "Teaching Topology to Neural Networks with Persistent Homology" by Shizuo Kaji and
 Yohsuke Watanabe, in preparation.
 
-
-Our pretraining is useful when ImageNet pretraining is not appropriate by some reasons such as fairness.
-See
-- Ninareh Mehrabi et al., A Survey on Bias and Fairness in Machine Learning, [arXiv:1908.09635](https://arxiv.org/abs/1908.09635)
-- Maithra Raghu et al., Transfusion: Understanding Transfer Learning for Medical Imaging, NeurIPS 2019, [arXiv:1902.07208](https://arxiv.org/abs/1902.07208)
-- Veronika Cheplygina, Cats or CAT scans: transfer learning from natural or medical image source datasets?, Current Opinion in Biomedical Engineering 9, [arXiv:1810.05444](https://arxiv.org/abs/1810.05444)
-- Hirokatsu Kataoka et al., Pre-training without Natural Images, ACCV 2020, [arXiv:2101.08515](https://arxiv.org/abs/2101.08515)
-
-
-
-Topological information encoded by the persistent homology is used as a pretraining task, 
+Topological information encoded by the persistent homology is used as the regression target for the pretraining task, 
 so the trained CNN will be expected to focus more on the shape rather than the texture, contrasting to ImageNet pretrained models.
 This may be helpful 
 - for finetuning for tasks dealing with medical images, which are completely different from natural images contained in ImageNet.
@@ -29,9 +29,16 @@ This may be helpful
 The implemented image generation is a simple FFT based one, but any image (synthesised or natural) can be used.
 
 To sum up,
-- No need for data collection
-- No need for manual labelling
 - Acquires robust image features based on topology
+- Works with virtually any neural network architectures
+- No need for data collection nor manual labelling
+
+Our pretraining scheme could be also useful when ImageNet pretraining is not appropriate by some reasons such as fairness.
+See
+- Ninareh Mehrabi et al., A Survey on Bias and Fairness in Machine Learning, [arXiv:1908.09635](https://arxiv.org/abs/1908.09635)
+- Maithra Raghu et al., Transfusion: Understanding Transfer Learning for Medical Imaging, NeurIPS 2019, [arXiv:1902.07208](https://arxiv.org/abs/1902.07208)
+- Veronika Cheplygina, Cats or CAT scans: transfer learning from natural or medical image source datasets?, Current Opinion in Biomedical Engineering 9, [arXiv:1810.05444](https://arxiv.org/abs/1810.05444)
+- Hirokatsu Kataoka et al., Pre-training without Natural Images, ACCV 2020, [arXiv:2101.08515](https://arxiv.org/abs/2101.08515)
 
 
 ## Licence
@@ -42,6 +49,10 @@ MIT Licence
 - Python 3: [Anaconda](https://anaconda.org) is recommended
 - PyTorch >= 1.8
 - tensorboard
+- persim: install by the following command
+
+    % pip install persim
+
 - CubicalRipser: install by the following command
 
     % pip install git+https://github.com/shizuo-kaji/CubicalRipser_3dim
@@ -69,7 +80,7 @@ Note that we can use any image dataset (e.g., ImageNet) not restricted to synthe
 
 ## Model pre-training
 
-    % python training.py --numof_dims_pt=200 --label_type persistent_image -t 'random' -pd PH_random -u 'resnet50' --max_life 80 60 -lm 'pretraining'
+    % python training.py --numof_dims_pt=200 --label_type persistence_image -t 'random' -pd PH_random -u 'resnet50' --max_life 80 60 -lm 'pretraining'
 
 You will find a pretrained weight file (e.g., `resnet50_pt_epoch90.pth`) under the directory 'result/XX', where XX is automatically generated from the date.
 Different types of persistent-homology-based labelling (vectorisation) can be specified, for example, by (--label_type 'life_curve').
@@ -78,7 +89,7 @@ The label will be 200 dimensional (--numof_dims_pt=200).
 
 If you wish to generate training images and labels on the fly (not efficient),
 
-    % python training.py --numof_dims_pt=200 --label_type persistent_image -t 'generate' -u 'resnet50' --alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5 -n 50000 --max_life 80 80 -lm 'pretraining'
+    % python training.py --numof_dims_pt=200 --label_type persistence_image -t 'generate' -u 'resnet50' --alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5 -n 50000 --max_life 80 80 -lm 'pretraining'
 
 The arguments (--alpha_range 0.01 1 --beta_range 0.5 2 -pc 0.5 -pb 0.5) are parameters for image generation. 
 In each epoch, 50000 (-n 50000) images are generated.

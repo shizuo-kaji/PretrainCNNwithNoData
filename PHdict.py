@@ -92,14 +92,15 @@ def comp_persistence_image(ph, args=None):
         s = np.sqrt((args.max_birth[d]-args.min_birth[d])*args.max_life[d]/args.num_bins[d])
         #print(s, args.num_bins[d])
         pim = persim.PersistenceImager(birth_range=(args.min_birth[d],args.max_birth[d]), pers_range=(0,args.max_life[d]),pixel_size=s,kernel_params={'sigma': [[args.persImg_sigma, 0.0], [0.0, args.persImg_sigma]]})
-        p = (ph[ph[:,0]==d])[:,1:3]
+        p = (ph[ph[:,0]==d])[:,1:3] # extract dim=d cycles
         life = p[:,1]-p[:,0]
         life = np.clip(life,a_min=None,a_max=args.max_life[d])
-        #p[:,1] = life
-        pi = pim.transform(p)
+        p[:,1] = life
+        pi = pim.transform(p, skew=False)
         #print(pi.shape)
         pi = pi.ravel()
-        pi = np.pad(pi,(0,args.num_bins[d]))[:args.num_bins[d]]
+        #pi = np.pad(pi,(0,args.num_bins[d]))
+        pi = pi[:args.num_bins[d]]
         #pi = np.sqrt(np.abs(pi))
         pims.append(pi.astype(np.float32))
     return(pims)
@@ -177,7 +178,7 @@ if __name__== "__main__":
     parser.add_argument('--min_birth', '-minb', type=int, nargs=2, default=None)
     parser.add_argument('--num_bins', '-n', type=int, nargs="*", default=[50,50,50,50])
     parser.add_argument('--bandwidth', '-b', type=int, default=1)
-    parser.add_argument('--persImg_sigma', '-s', type=float, default=100)
+    parser.add_argument('--persImg_sigma', '-s', type=float, default=1)
     parser.add_argument('--imgtype', '-it', type=str, default="jpg")
     parser.add_argument('--type', '-t', type=str, choices=['raw','life_curve','PH_hist','persistence_image','landscape','class'], help="type of label")
     parser.add_argument("--num_workers", '-nw', default=8, type = int, help="num of workers (data_loader)")
@@ -196,9 +197,10 @@ if __name__== "__main__":
         else:
             args.min_birth = [-args.max_life[0],-args.max_life[1]]
     
+    grad = "grad" if args.gradient else ""
     if args.output is None:
         dn1,dn2 = os.path.split((os.path.normpath(args.target_dir))) # the leaf name
-        phdn = os.path.join(dn1,"PH_"+dn2)
+        phdn = os.path.join(dn1,"PH{}_{}".format(grad,dn2))
         if os.path.isdir(phdn):
             print("Please specify output directory!")
             exit()

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse,sys,os,glob,torch
+import numpy as np
 
 def arguments():
     parser = argparse.ArgumentParser(description="training CNN models")
@@ -25,12 +26,12 @@ def arguments():
     parser.add_argument("--prob_binary", '-pb', default=0.5, type = float, help="probability of binarising the generated image")
     parser.add_argument("--prob_colour", '-pc', default=0.5, type = float, help="probability of generating colour images")
     # persistent homology (label) parameter
-    parser.add_argument("--max_life", '-ml', default=[80,80], type = int, nargs=2, help="maximum life time of each dimension for PH regression")
+    parser.add_argument("--max_life", '-ml', default=[50,50], type = int, nargs=2, help="maximum life time of each dimension for PH regression")
     parser.add_argument("--max_birth", '-maxb', default=None, type = int, nargs=2, help="maximum birth time of each dimension for PH regression")
     parser.add_argument('--min_birth', '-minb', type=int, default=None, nargs=2, help="minimum birth time of each dimension for PH regression")
     parser.add_argument('--affine', '-aff', default=False, action='store_true', help='apply random affine transformation')
     parser.add_argument('--bandwidth', '-bd', type=int, default=1, help='bandwidth of label smoothing')
-    parser.add_argument('--persImg_sigma', type=float, default=100, help='sigma for persistence image')
+    parser.add_argument('--persImg_sigma', type=float, default=1, help='sigma for persistence image')
     parser.add_argument('--label_type_pt', '-lt', default="PH_hist", choices=['raw','life_curve','PH_hist','persistence_image','landscape','class'], help='label type for the pretraining task')
     parser.add_argument('--persistence_after_transform', '-pat', action="store_true", help='PH computation after applying transformation')
     parser.add_argument('--distance_transform', '-dt', action="store_true", default=True, help="apply distance transform")
@@ -41,7 +42,7 @@ def arguments():
     parser.add_argument("--usenet", '-u', default="resnet50", type = str, help="network architecture")
     parser.add_argument("--epochs", '-e', default=90, type = int, help="number of training epochs") # 90
     #parser.add_argument("--numof_classes", '-nc', default=100, type = int, help="num of dimensions for the main task")
-    parser.add_argument("--numof_dims_pt", '-nd', default=148, type = int, help="num of output dimensions for pretraining")
+    parser.add_argument("--numof_dims_pt", '-nd', default=200, type = int, help="num of output dimensions for pretraining") # 148 (or mod 3=0) for PH_hist
     # optimiser
     parser.add_argument("--lr_fine", '-lrf', default=0.01, type = float, help="initial learning rate for pretraining") #0.01
     parser.add_argument("--lr_pre", '-lrp', default=0.1, type = float, help="initial learning rate for finetuning")
@@ -82,6 +83,24 @@ def arguments():
             args.min_birth = [0,0]
         else:
             args.min_birth = [-args.max_life[0],-args.max_life[1]]
+
+    # set PH regression output dimensions
+    if args.label_type_pt in ["life_curve","landscape"]:
+        args.num_bins = [args.numof_dims_pt//2,args.numof_dims_pt-args.numof_dims_pt//2]
+    elif args.label_type_pt == "persistence_image":
+        args.num_bins = [0,0]
+        for d in [0,1]:
+            pix_s = np.sqrt((args.max_birth[d]-args.min_birth[d])*args.max_life[d] / (args.numof_dims_pt//2))
+            args.num_bins[d] = int(((args.max_birth[d]-args.min_birth[d])//pix_s) * (args.max_life[d]//pix_s))
+        args.numof_dims_pt = sum(args.num_bins)
+        print("Persistence image output dims set to: {} + {} = {}".format(*args.num_bins, args.numof_dims_pt))
+    elif args.label_type_pt == "PH_hist":
+        if args.gradient:
+            b = args.numof_dims_pt//3
+            args.num_bins = [b,b,1,args.numof_dims_pt-2*b-1]
+        else:
+            b = args.numof_dims_pt//4
+            args.num_bins = [b,b,b,args.numof_dims_pt-3*b]
         
     # choose the latest weight file in the specified dir
     if args.path2weight is not None and os.path.isdir(args.path2weight):
@@ -120,10 +139,11 @@ def arguments():
         args.val_pt = args.val
 
     # set PHdir automatically
+    grad = "grad" if args.gradient else ""
     if args.path2PHdir is None:
         if not args.persistence_after_transform:
             dn1,dn2 = os.path.split(os.path.dirname(os.path.normpath(args.train_pt)))
-            phdn = os.path.join(dn1,"PH_"+dn2)
+            phdn = os.path.join(dn1,"PH{}_{}".format(grad,dn2))
             if os.path.isdir(phdn):
                 args.path2PHdir = phdn
             else:
