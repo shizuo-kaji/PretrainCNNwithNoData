@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os,random,glob,time
+import os,random,glob,time,shutil
 import json,gc
 import numpy as np
 from PIL import Image
@@ -98,7 +98,8 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
     # dataset loading
     if args.learning_mode == "simultaneous": # use a single dataset but with two tasks: classification and PH
         train_datasets = [DatasetFolderPH(train_data_path, transform=train_transform, args=args)]
-        print(len(train_datasets[0]), "first train images loaded (used for both classification and PH regression).")
+        if rank == 0:
+            print(len(train_datasets[0]), "first train images loaded (used for both classification and PH regression).")
         numof_classes = train_datasets[0].n_classes
         outdim = numof_classes+args.numof_dims_pt
         parts = [(0,numof_classes),(numof_classes,outdim)]
@@ -106,27 +107,40 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
     else:
         if args.label_type_pt == "class" or mode == "finetuning":
             train_datasets = [datasets.ImageFolder(train_data_path, transform=train_transform)]
-            print(len(train_datasets[0]), "first train images loaded from ", train_data_path)
             outdim = len(train_datasets[0].classes)
-            print("number of classes: ", outdim)
+            if rank == 0:
+                print(len(train_datasets[0]), "first train images loaded from ", train_data_path)
+                print("number of classes: ", outdim)
             criterions = [nn.CrossEntropyLoss(reduction='mean').to(rank)]
         else: ## PH related tasks
-            if os.path.isdir(args.path2PHdir):
-                print("PH will be loaded from: ",args.path2PHdir)
-            else:
-                print("PH computed on the fly")
+            if rank == 0:
+                if os.path.isdir(args.path2PHdir):
+                    print("PH will be loaded from: ",args.path2PHdir)
+                # caching
+                if args.cachedir is not None:
+                    if os.path.exists(args.cachedir):
+                        shutil. rmtree(args.cachedir)
+                    os.makedirs(args.cachedir,exist_ok=True)
+                    if train_data_path=="generate":
+                        os.makedirs(os.path.join(args.cachedir,'train'),exist_ok=True)
+                        os.makedirs(os.path.join(args.cachedir,'val'),exist_ok=True)
+                    print("PH computation will be cached in ",args.cachedir)
             if train_data_path=="generate":
-                train_datasets = [DatasetFolderPH(root="generate", transform=train_transform, args=args)]
-                print(len(train_datasets[0]), "training images are generated on the fly.")
+                imdir = os.path.join(args.cachedir,'train') if args.cachedir is not None else ""
+                train_datasets = [DatasetFolderPH(root=imdir, transform=train_transform, generate_on_the_fly=True, args=args)]
+                if rank == 0:
+                    print(len(train_datasets[0]), "training images are generated on the fly.")
             else:
                 train_datasets = [DatasetFolderPH(train_data_path, transform=train_transform, args=args)]
-                print(len(train_datasets[0]), "first train images loaded from ", train_data_path)
+                if rank == 0:
+                    print(len(train_datasets[0]), "first train images loaded from ", train_data_path)
             criterions = [nn.MSELoss(reduction='mean').to(rank)]
             outdim = args.numof_dims_pt
         # second dataset
         if args.learning_mode == "alternating":
             train_datasets.append(DatasetFolderPH(args.train_pt, transform=train_transform, args=args, PH_vect_dim=args.numof_dims_pt))
-            print(len(train_datasets[0]), len(train_datasets[1]), "first and second train images loaded.")
+            if rank == 0:
+                print(len(train_datasets[0]), len(train_datasets[1]), "first and second train images loaded.")
             numof_classes = train_datasets[0].n_classes
             outdim = numof_classes+args.numof_dims_pt
             parts = [(0,numof_classes),(numof_classes,outdim)]
@@ -168,19 +182,27 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
         if args.label_type_pt == "class" or mode == "finetuning":
             test_datasets = [datasets.ImageFolder(val_data_path, transform=test_transform)]
         else:
-            test_datasets = [DatasetFolderPH(val_data_path, transform=test_transform,args=args)]
+            if val_data_path=="generate":
+                imdir = os.path.join(args.cachedir,'val') if args.cachedir is not None else ""
+                test_datasets = [DatasetFolderPH(root=imdir, transform=train_transform, generate_on_the_fly=True, args=args)]
+                if rank == 0:
+                    print(len(test_datasets[0]), "validation images are generated on the fly.")
+            else:
+                test_datasets = [DatasetFolderPH(val_data_path, transform=test_transform,args=args)]
+                if rank == 0:
+                    print(len(test_datasets[0]), "first validation images loaded.")
+
         test_loaders = [torch.utils.data.DataLoader(test_datasets[0], batch_size=args.batch_size, shuffle=False,
                                                  num_workers=args.num_workers, pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn)]
-        print(len(test_datasets[0]), "first validation images loaded.")
         if args.learning_mode == "alternating":
             test_datasets.append(DatasetFolderPH(args.val_pt, transform=test_transform,args=args, PH_vect_dim=args.numof_dims_pt))
             test_loaders.append(torch.utils.data.DataLoader(test_datasets[1], batch_size=args.batch_size, shuffle=False,
                                                  num_workers=args.num_workers, pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn))
-            print(len(test_datasets[1]), "second validation images loaded.")
+            if rank == 0:
+                print(len(test_datasets[1]), "second validation images loaded.")
 
     # setup model and optimiser
     model = model_select(args, outdim)
-    print("NN output dimension: ", outdim)
     if args.world_size != 1:
         if args.pidf in ["nccl","gloo"]:
             model = DDP(model.to(rank), device_ids=[rank],output_device=rank)
@@ -191,6 +213,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
         model = model.to(device)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if rank == 0:
+        print("NN output dimension: ", outdim)
         print('The number of parameters of model is', num_params)
 
     lr = args.lr_fine if mode=="finetuning" else args.lr_pre
@@ -199,14 +222,13 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
     elif "adam" in args.optimizer:
         optimizer = optim.Adam(model.parameters(), lr=lr)
         print("using Adam.")
+
     if "cos" in args.optimizer:
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
         print("using cosine annealing.")
     else:
         if args.epochs == 200: # TEMP: resnet18
             scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 120, 160], gamma=0.2)
-        # elif args.epochs == 90:
-        #     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[30, 60, 80], gamma=0.2)
         else:
             if rank == 0:
                 print("LR drops at: ", [(i+1) * args.epochs//args.lr_drop for i in range(args.lr_drop-1)])
@@ -234,7 +256,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
             for i in range(len(criterions)):
                 if args.pidf in ["nccl","gloo"]:
                     train_samplers[i].set_epoch(epoch)
-                    loss, acc, _ = train(args, model, rank, train_loaders[i], optimizer, epoch, [criterions[i]], part=parts[i])
+                    loss, acc, _ = train(args, model, rank, train_loaders[i], optimizer, epoch, [criterions[i]], part=parts[i], quiet=(rank!=0))
                 else:
                     loss, acc, _ = train(args, model, device, train_loaders[i], optimizer, epoch, [criterions[i]], part=parts[i])
                 if rank == 0 and val_data_path is not None:
@@ -251,7 +273,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
         else: #simultaneous
             if args.pidf in ["nccl","gloo"]:
                 train_samplers[0].set_epoch(epoch)
-                loss, acc, loss2 = train(args, model, rank, train_loaders[0], optimizer, epoch, criterions, part=parts)
+                loss, acc, loss2 = train(args, model, rank, train_loaders[0], optimizer, epoch, criterions, part=parts, quiet=(rank!=0))
             else:
                 loss, acc, loss2 = train(args, model, device, train_loaders[0], optimizer, epoch, criterions, part=parts)
             if rank == 0 and val_data_path is not None:
@@ -290,11 +312,28 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
         fh.write("\n")
         fh.write("\n".join([str(f) for f in exp.val_rec]))
 
+#####################################
 if __name__== "__main__":
 
+    # number of GPUs
+    if torch.cuda.device_count() <= 1:
+        #print(torch.cuda.device_count(), "GPUs available")
+        args.world_size = 1
+
+    # create directories for log and output
     dtstr = dt.now().strftime('%Y_%m%d_%H%M')
     if args.learning_mode == "finetuning":
         dtstr += "_finetuning"
+        if args.path2weight is None:
+            dtstr += "_scratch"
+        elif "persistence_image" in args.path2weight:
+            dtstr += "_PI"
+        elif "landscape" in args.path2weight:
+            dtstr += "_LS"
+        elif "life_curve" in args.path2weight:
+            dtstr += "_LC"
+        elif "imagenet" in args.path2weight:
+            dtstr += "_IMN"
     else:
         grd ="grad_" if args.gradient else ""
         if args.label_type_pt != 'class':
@@ -322,16 +361,19 @@ if __name__== "__main__":
     
 
     # to be deterministic
-    #cudnn.deterministic = True
+    if args.seed > 0:
+        cudnn.deterministic = True
     cudnn.benchmark = True
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
 
+    # pretraining and finetuing iterations
     if args.learning_mode=="combined":  
         modes = ["pretraining","finetuning"]
     else:
         modes = [args.learning_mode]
+
     for mode in modes:
         starttime = time.time()
         if args.pidf in ["nccl","gloo"]:

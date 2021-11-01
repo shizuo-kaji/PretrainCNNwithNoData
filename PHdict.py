@@ -12,6 +12,7 @@ from scipy.stats import gaussian_kde
 import argparse,json
 import cripser
 from scipy.ndimage.morphology import distance_transform_edt
+from skimage import feature,morphology
 from skimage.filters import threshold_otsu, scharr
 from PIL import Image
 from multiprocessing import Pool
@@ -22,32 +23,61 @@ try:
 except:
     pass
 
-def preprocess_image(img, gradient=False, distance_transform=True, binarize=False):
+def preprocess_image(img, gradient=False, img_size=None, filtration=None, origin=(0,0)):
     if len(img.shape)>2:
         im = np.dot(img[...,:3], [0.2989, 0.5870, 0.1140])
     else:
         im = img
+
+    if img_size:
+        import skimage.transform
+        im = skimage.transform.resize(im,(img_size,img_size))
+
     if gradient:
+        #im = feature.canny(im, sigma=10)
         im = scharr(im)
-    if distance_transform:
+
+    if filtration is not None:
         if im.max()==im.min():
             return(np.zeros_like(im))
         bw_img = (im >= threshold_otsu(im))
-        if gradient:
-            dt_img = distance_transform_edt(~bw_img)
-        else:
-            dt_img = distance_transform_edt(bw_img)-distance_transform_edt(~bw_img)
-        dt_img *= 256/img.shape[0]  # scaling normalisation
-        #print(dt_img.min(),dt_img.max())
+        #bw_img = morphology.area_opening(bw_img, area_threshold=8, connectivity=2)
+
+        if filtration=='binarise':
+            return(bw_img)
+        if filtration == 'distance':
+            dt_img = distance_transform_edt(~bw_img) # distance from the foreground 0
+            #print(dt_img.max())
+        elif filtration == 'signed_distance':
+            dt_img = distance_transform_edt(~bw_img)-distance_transform_edt(bw_img)
+        elif filtration in ['downward','upward']:
+            null_idx = (bw_img == 0)
+            ## height transform
+            if len(im.shape) == 3: #(z,y,x)
+                h = np.arange(im.shape[0]).reshape(-1,1,1)
+            else:
+                h = np.arange(im.shape[0]).reshape(-1,1)
+            if filtration=='upward':
+                h = np.max(h) - h
+            dt_img = (bw_img * h)
+            dt_img[null_idx] = np.max(h)
+        elif 'radial' in filtration:
+            null_idx = (bw_img == 0)
+            h = np.linalg.norm(np.stack(np.meshgrid(*map(range,im.shape),indexing='ij'),axis=-1)-np.array(origin), axis=-1)
+            dt_img = (bw_img * h)
+            if filtration=='radial_inv':
+                dt_img = np.max(dt_img) - dt_img
+            else:
+                dt_img[null_idx] = np.max(h)
+
+        dt_img *= 256/dt_img.shape[0]  # scaling normalisation
         return(dt_img)
-    elif binarize:
-        return(im >= threshold_otsu(im))
     else:
         return(im)
 
-def comp_PH(img, distance_transform=True, gradient=True):
-    im = preprocess_image(img, gradient=gradient, distance_transform=distance_transform)
-    pd = cripser.computePH(im)
+def comp_PH(img, gradient=True, img_size=None, filtration=None):
+    im = preprocess_image(img, gradient=gradient, img_size=img_size, filtration=filtration)
+    pd = cripser.computePH(im.astype(np.float64))
     #pd = cripser.computePH(im,maxdim=args.maxdim,top_dim=args.top_dim,embedded=args.embedded)
     #print(sum(pd[:,0] == 1))
     #print(im.shape)
@@ -56,13 +86,14 @@ def comp_PH(img, distance_transform=True, gradient=True):
 def comp_save_PH(fname, args):
     bfn = os.path.splitext(os.path.basename(fname))[0]
     img = np.array(Image.open(fname).convert('L'),dtype=np.float64)
-    ph = comp_PH(img, gradient=args.gradient, distance_transform=args.distance_transform)
+    ph = comp_PH(img, gradient=args.gradient, filtration=args.filtration, img_size=args.img_size)
     np.save(os.path.join(args.output, bfn), ph)
 
 def comp_save_persistence_image(fname, args=None):
     bfn = os.path.splitext(os.path.basename(fname))[0]
-    img = np.array(Image.open(fname).convert('L'),dtype=np.float64)
-    ph = comp_PH(img, gradient=args.gradient, distance_transform=args.distance_transform)
+    img = Image.open(fname).convert('L')
+    img = np.array(img, dtype=np.float64)
+    ph = comp_PH(img, gradient=args.gradient, img_size=args.img_size, filtration=args.filtration)
     pims = comp_persistence_image(ph, args)
     np.save(os.path.join(args.output, bfn+"_persImg"), np.concatenate(pims).astype(np.float32))
     if args.save_fig:
@@ -72,36 +103,45 @@ def comp_save_persistence_image(fname, args=None):
         plt.close()
         # plt.imshow(pims[0].reshape(10,5))
         # plt.savefig(os.path.join(args.output, bfn+"_persImg0.jpg"))
-        # plt.close()           
+        # plt.close()
         # plt.imshow(pims[1].reshape(10,5))
         # plt.savefig(os.path.join(args.output, bfn+"_persImg1.jpg"))
-        # plt.close()           
+        # plt.close()
     return(pims)
 
-def comp_landscape(ph,  dim, min_birth=None, max_birth=None, max_life=None,n=2):
+def comp_landscape(ph,  dim, min_birth=None, max_birth=None, max_life=None,n=5):
     res = []
-    for d in range(2):
+    for d in [0,1]:
         pds = ph[ph[:,0] == d, 1:3]
         #pds[:,1] = pds[:,0]+(np.clip(pds[:,1]-pds[:,0],0,max_life))
-        res.append(Landscape(num_landscapes=n, resolution=dim[d]//n, sample_range=[min_birth,max_birth]).fit_transform([pds]).ravel().astype(np.float32))
-    return(np.concatenate(res))
+        res.append(Landscape(num_landscapes=n, resolution=dim[d]//n, sample_range=[min_birth[d],max_birth[d]]).fit_transform([pds]).ravel().astype(np.float32))
+    return(np.sqrt(np.concatenate(res)))
 
 def comp_persistence_image(ph, args=None):
     pims = []
     for d in [0,1]:
         s = np.sqrt((args.max_birth[d]-args.min_birth[d])*args.max_life[d]/args.num_bins[d])
-        #print(s, args.num_bins[d])
-        pim = persim.PersistenceImager(birth_range=(args.min_birth[d],args.max_birth[d]), pers_range=(0,args.max_life[d]),pixel_size=s,kernel_params={'sigma': [[args.persImg_sigma, 0.0], [0.0, args.persImg_sigma]]})
+        p = int((args.max_birth[d]-args.min_birth[d])/s)
+        q = int(args.max_life[d]/s)
+        while p*q < args.num_bins[d]:
+            s = max((args.max_birth[d]-args.min_birth[d])/(p+1), args.max_life[d]/(q+1))
+            p = int((args.max_birth[d]-args.min_birth[d])/s)
+            q = int(args.max_life[d]/s)
+        pim = persim.PersistenceImager(birth_range=(args.min_birth[d],args.max_birth[d]),
+            pers_range=(0,args.max_life[d]),pixel_size=s,
+            kernel_params={'sigma': [[args.persImg_sigma, 0.0], [0.0, args.persImg_sigma]]},
+            weight_params={'n': args.persImg_weight})
         p = (ph[ph[:,0]==d])[:,1:3] # extract dim=d cycles
         life = p[:,1]-p[:,0]
         life = np.clip(life,a_min=None,a_max=args.max_life[d])
         p[:,1] = life
         pi = pim.transform(p, skew=False)
+        #print(s, args.num_bins[d])
         #print(pi.shape)
         pi = pi.ravel()
         #pi = np.pad(pi,(0,args.num_bins[d]))
         pi = pi[:args.num_bins[d]]
-        #pi = np.sqrt(np.abs(pi))
+        pi = np.abs(pi) ** args.persImg_power # to suppress overflow during learning
         pims.append(pi.astype(np.float32))
     return(pims)
 
@@ -178,13 +218,16 @@ if __name__== "__main__":
     parser.add_argument('--min_birth', '-minb', type=int, nargs=2, default=None)
     parser.add_argument('--num_bins', '-n', type=int, nargs="*", default=[50,50,50,50])
     parser.add_argument('--bandwidth', '-b', type=int, default=1)
-    parser.add_argument('--persImg_sigma', '-s', type=float, default=1)
-    parser.add_argument('--imgtype', '-it', type=str, default="jpg")
-    parser.add_argument('--type', '-t', type=str, choices=['raw','life_curve','PH_hist','persistence_image','landscape','class'], help="type of label")
+    parser.add_argument('--persImg_sigma', '-ps', type=float, default=1)
+    parser.add_argument('--persImg_power', '-pp', type=float, default=0.5, help='scaling for the vector')
+    parser.add_argument('--persImg_weight', '-pn', type=float, default=1.0, help='weight for persistence weighting in persistence image')
+    parser.add_argument('--imgtype', '-it', type=str, default=None)
+    parser.add_argument('--type', '-t', type=str, choices=['raw','life_curve','PH_hist','persistence_image','landscape','grid'], help="type of label")
+    parser.add_argument('--filtration', '-f', default='signed_distance', choices=[None,'distance','signed_distance','radial','radial_inv','upward','downward'], help="type of filtration")
     parser.add_argument("--num_workers", '-nw', default=8, type = int, help="num of workers (data_loader)")
     parser.add_argument('--save_fig', '-sf', action="store_true", help="save graphs")
-    parser.add_argument('--distance_transform', '-dt', action="store_true", default=True, help="apply distance transform")
     parser.add_argument('--gradient', '-g', action="store_true", default=False, help="apply gradient filter")
+    parser.add_argument("--img_size", '-is', default=None, type = int, help="input images will be resized initially")
 
     args = parser.parse_args()
 	# adjustment w.r.t. the possible minimum value for the image
@@ -192,21 +235,21 @@ if __name__== "__main__":
         args.max_birth = [args.max_life[0],args.max_life[1]]
 
     if args.min_birth is None:
-        if not args.distance_transform or args.gradient:
-            args.min_birth = [0,0]
-        else:
+        if args.filtration=='signed_distance':
             args.min_birth = [-args.max_life[0],-args.max_life[1]]
-    
+        else:
+            args.min_birth = [0,0]
+
     grad = "grad" if args.gradient else ""
     if args.output is None:
         dn1,dn2 = os.path.split((os.path.normpath(args.target_dir))) # the leaf name
-        phdn = os.path.join(dn1,"PH{}_{}".format(grad,dn2))
-        if os.path.isdir(phdn):
-            print("Please specify output directory!")
-            exit()
-        else:
-            args.output = phdn
-            print("output will be saved under: ", args.output)
+        phdn = os.path.join(dn1,"PH{}_{}_{}".format(grad,args.filtration,dn2))
+        # if os.path.isdir(phdn):
+        #     print("Please specify output directory!")
+        #     exit()
+        # else:
+        args.output = phdn
+        print("output will be saved under: ", args.output)
 
     ###
     print(args)
@@ -215,7 +258,11 @@ if __name__== "__main__":
 
     with open(os.path.join(args.output, "args.json"), mode="w") as f:
         json.dump(args.__dict__, f, indent=4)
-    fns=sorted(glob.glob(os.path.join(target_dir,"**/*.{}".format(args.imgtype)), recursive=True))
+    gfns = []
+    imgtypes = [args.imgtype] if args.imgtype else ['png','PNG','jpg','JPG','tif','TIF','tiff','TIFF']
+    for it in imgtypes:
+        gfns.extend(glob.glob(os.path.join(target_dir,"**/*.{}".format(it)), recursive=True))
+    fns=sorted(list(set(gfns)))
 
     if args.type == "PH_hist":
         print("compute and save persistence histogram...")
@@ -229,7 +276,7 @@ if __name__== "__main__":
                 ph = np.load(fname)
             else:
                 sample = np.array(Image.open(fname).convert('L'),dtype=np.float64)
-                ph = comp_PH(sample, gradient=args.gradient, distance_transform=args.distance_transform)
+                ph = comp_PH(sample, gradient=args.gradient, filtration=args.filtration)
                 np.save(os.path.join(args.output, bfn), ph)
             hs = PH_hist(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life, bandwidth=args.bandwidth)
             np.save(os.path.join(args.output, bfn+"_hist"), hs.astype(np.float32))
@@ -267,7 +314,7 @@ if __name__== "__main__":
         meanPHl1 = np.zeros(args.num_bins[1])
         for fname in tqdm(fns, total=len(fns)):
             sample = np.array(Image.open(fname).convert('L'),dtype=np.float64)
-            ph = comp_PH(sample, gradient=args.gradient, distance_transform=args.distance_transform)
+            ph = comp_PH(sample, gradient=args.gradient, filtration=args.filtration)
             res = life_curve(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life)
             bfn = os.path.splitext(os.path.basename(fname))[0]
             np.save(os.path.join(args.output, bfn+"_lifeCurve"), res.astype(np.float32))
@@ -295,6 +342,7 @@ if __name__== "__main__":
                 for _ in pool.imap_unordered(task, fns):
                     t.update(1)
     elif args.type == "grid":
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
         fig = plt.figure(figsize=(21,10),tight_layout=True)
         n = min(len(fns),10)
         axes = fig.subplots(n, 6)
@@ -302,28 +350,40 @@ if __name__== "__main__":
             fname = fns[i]
             colour = Image.open(fname)
             sample = (np.array(colour.convert('L'),dtype=np.float64))
-            mask = preprocess_image(sample, gradient=args.gradient, distance_transform=False, binarize=True) ## used only for preview
-            dt = preprocess_image(sample, gradient=args.gradient, distance_transform=args.distance_transform)
+            mask = preprocess_image(sample, gradient=args.gradient, filtration='binarise', img_size=args.img_size) ## used only for preview
+            dt = preprocess_image(sample, gradient=args.gradient, filtration=args.filtration, img_size=args.img_size)
             print(dt.min(),dt.max())
-            ph = comp_PH(sample, gradient=args.gradient, distance_transform=args.distance_transform)
+            ph = comp_PH(sample, gradient=args.gradient, filtration=args.filtration, img_size=args.img_size)
             axes[i,0].imshow(colour)
+            axes[i,0].set_axis_off()
             axes[i,0].set_title(os.path.basename(fns[i]))
             axes[i,1].imshow(mask)
-            axes[i,2].imshow(dt,vmin=args.min_birth,vmax=args.max_birth)
+            axes[i,1].set_axis_off()
+            im2 = axes[i,2].imshow(dt,vmin=args.min_birth[0],vmax=args.max_birth[0], )
+            axes[i,2].set_axis_off()
+            divider = make_axes_locatable(axes[i,2])
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            fig.colorbar(im2, cax=cax, orientation='vertical')
+
+            axes[i,3].set_title("LC")
             res = life_curve(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life)
+            #print(ph)
             sns.lineplot(x=np.arange(args.num_bins[0]),y=res[:args.num_bins[0]], ax=axes[i,3])
             sns.lineplot(x=np.arange(args.num_bins[1]),y=res[args.num_bins[0]:], style=True, dashes=[(2,3)], ax=axes[i,3])
-            res = hist_PH(ph, args)
+            axes[i,4].set_title("HS")
+            res = PH_hist(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life)
             sns.lineplot(x=np.arange(args.num_bins[0]),y=res[:args.num_bins[0]], ax=axes[i,4])
             sns.lineplot(x=np.arange(args.num_bins[1]),y=res[args.num_bins[0]:(args.num_bins[0]+args.num_bins[1])], style=True, dashes=[(2,2)], ax=axes[i,4])
             sns.lineplot(x=np.arange(args.num_bins[2]),y=res[(args.num_bins[0]+args.num_bins[1]):(args.num_bins[0]+args.num_bins[1]+args.num_bins[2])],linewidth=2.5, ax=axes[i,4])
             sns.lineplot(x=np.arange(args.num_bins[3]),y=res[(args.num_bins[0]+args.num_bins[1]+args.num_bins[2]):], style=True, dashes=[(2,2)],linewidth=2.5, ax=axes[i,4])
+            axes[i,5].set_title("PI")
             res = comp_persistence_image(ph, args)
-            sns.lineplot(x=np.arange(args.num_bins[0]),y=res[:args.num_bins[0]], ax=axes[i,5])
-            sns.lineplot(x=np.arange(len(res[args.num_bins[0]:])),y=res[args.num_bins[0]:], style=True, dashes=[(2,2)], ax=axes[i,5])
+            #print(res[0].shape)
+            sns.lineplot(x=np.arange(len(res[0])),y=res[0], ax=axes[i,5])
+            sns.lineplot(x=np.arange(len(res[0])),y=res[1], style=True, dashes=[(2,2)], ax=axes[i,5])
             for ax in axes[i]:
                 ax.legend([],[], frameon=False)
-        plt.savefig("persistence_vectors.jpg")
+        plt.savefig(os.path.join(args.output,"persistence_vectors.jpg"))
         plt.show()
 
     ## compute persistence diagrams only
@@ -331,6 +391,6 @@ if __name__== "__main__":
         print("compute and save persistent homology...")
         task = partial(comp_save_PH, args=args)
         with Pool(args.num_workers) as pool:
-            with tqdm(total=len(fns)) as t:
+            with tqdm(total=len(fns), ascii=True, ncols=100) as t:
                 for _ in pool.imap_unordered(task, fns):
                     t.update(1)

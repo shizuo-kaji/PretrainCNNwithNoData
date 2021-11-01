@@ -8,44 +8,11 @@ import os,glob
 import os.path
 from typing import Any, Callable, cast, Dict, List, Optional, Tuple
 import numpy as np
-from PHdict import comp_PH, PH_hist, life_curve, comp_persistence_image, comp_landscape
 from scipy.fft import fft2, ifft2
 from skimage.filters import threshold_otsu
 
-
-def generate_random_image(args):
-    np.random.seed()
-    sample=np.zeros(1)
-    p = np.random.uniform(0,1)
-    if p<args.prob_colour:
-        channel = 3
-    else:
-        channel = 1
-    while sample.max()-sample.min()<1e-10:
-        sample = []
-        for i in range(channel):
-            alpha = np.random.uniform(*args.alpha_range)
-            beta = np.random.uniform(*args.beta_range)
-            x = np.linspace(1,np.exp(alpha)*args.img_size,args.img_size)
-            X, Y = np.meshgrid(x,x)
-            noise = np.random.uniform(0,1,(args.img_size,args.img_size))
-            f = fft2(noise)
-            f = f/(X**2+Y**2)**beta
-            sample.append(ifft2(f).real)
-        sample = np.array(sample)
-    #print(sample.shape)
-    #print(sample.min(), sample.max())
-    for i in range(channel):
-        p = np.random.uniform(0,1)
-        if p<args.prob_binary/2:
-            sample[i] = (sample[i] >= threshold_otsu(sample[i]))
-        elif p<args.prob_binary:
-            sample[i] = (sample[i] < threshold_otsu(sample[i]))
-        else:
-            sample[i] = (sample[i]-sample[i].min())/np.ptp(sample[i])
-    sample = Image.fromarray((255*sample).astype(np.uint8).transpose(1,2,0).squeeze())
-    return sample
-
+from PHdict import comp_PH, PH_hist, life_curve, comp_persistence_image, comp_landscape
+from random_image import generate_random_image
 
 class DatasetFolderPH(VisionDataset):
     def __init__(
@@ -53,18 +20,24 @@ class DatasetFolderPH(VisionDataset):
             root: str,
             loader: Callable[[str], Any] = None,
             transform: Optional[Callable] = None,
+            generate_on_the_fly = False,
             args = None
     ) -> None:
         super(DatasetFolderPH, self).__init__(root, transform=transform)
 
         self.args = args
-        if root=="generate":
-            self.generate_on_the_fly = True
-            self.n_samples = args.n_samples
+        self.generate_on_the_fly = generate_on_the_fly
+        if generate_on_the_fly:
+            if root.endswith('train'):
+                self.n_samples = args.n_samples
+                prefix = 't'
+            else:
+                self.n_samples = args.n_samples_val
+                prefix = 'v'
             self.classes = [0 for i in range(args.n_samples)]
+            self.samples = [os.path.join(self.root,"{}{:0>8}.jpg".format(prefix,i)) for i in range(args.n_samples)]
             self.n_classes = 1
         else:
-            self.generate_on_the_fly = False
             #self.samples = glob.glob(os.path.join(self.root, "**/*.png"), recursive=True)
             #self.samples.extend(glob.glob(os.path.join(self.root, "**/*.jpg"), recursive=True))
             self.samples, self.classes = make_dataset(self.root)
@@ -83,11 +56,16 @@ class DatasetFolderPH(VisionDataset):
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
 
         # input image generation/loading
-        if self.generate_on_the_fly:
-            sample=generate_random_image(self.args).convert('RGB')
-        else:
-            path = self.samples[index]
+        path = self.samples[index]
+        if os.path.isfile(path):
             sample = self.loader(path)
+        elif self.generate_on_the_fly:
+            sample=generate_random_image(self.args).convert('RGB')
+            if self.args.cachedir is not None:
+                sample.save(path)
+        else:
+            print("file not found: ", path)
+            exit()
 
         # apply image transform; if path2PHdir is set, then PH will be loaded from file and thus the timing of transform does not matter.
         if self.args.persistence_after_transform and self.transform is not None:
@@ -96,23 +74,32 @@ class DatasetFolderPH(VisionDataset):
         if self.args.label_type_pt == "raw":
             hs = np.load(os.path.join(self.args.path2PHdir, os.path.splitext(os.path.basename(path))[0]+".npy")).astype(np.float32)
         else:
-            # PH
-            if self.args.path2PHdir == "on_the_fly":
-                ph = comp_PH(np.array(sample),gradient=self.args.gradient, distance_transform=self.args.distance_transform)
+            if self.args.cachedir is not None:
+                cachefn = os.path.join(self.args.cachedir, os.path.splitext(os.path.basename(path))[0]+"_cache.npy")                
             else:
-                ph = np.load(os.path.join(self.args.path2PHdir, os.path.splitext(os.path.basename(path))[0]+".npy"))
-            # PH vectorisation
-            if self.args.label_type_pt == "life_curve":
-                hs = life_curve(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life).astype(np.float32)
-            elif self.args.label_type_pt == "landscape":
-                hs = comp_landscape(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life, n=2).astype(np.float32)
-            elif self.args.label_type_pt == "PH_hist":
-                hs = PH_hist(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life, bandwidth=self.args.bandwidth).astype(np.float32)
-            elif self.args.label_type_pt == "persistence_image":
-                hs = np.concatenate(comp_persistence_image(ph, self.args)).astype(np.float32)
+                cachefn = ""
+            if os.path.isfile(cachefn):
+                hs = np.load(cachefn).astype(np.float32)
             else:
-                print("Unknown label type")
-                exit()
+                # PH
+                if self.args.path2PHdir == "on_the_fly":
+                    ph = comp_PH(np.array(sample),gradient=self.args.gradient, filtration=self.args.filtration)
+                else:
+                    ph = np.load(os.path.join(self.args.path2PHdir, os.path.splitext(os.path.basename(path))[0]+".npy"))
+                # PH vectorisation
+                if self.args.label_type_pt == "life_curve":
+                    hs = life_curve(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life).astype(np.float32)
+                elif self.args.label_type_pt == "landscape":  ## num, max_time
+                    hs = comp_landscape(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life, n=2).astype(np.float32)
+                elif self.args.label_type_pt == "PH_hist":
+                    hs = PH_hist(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life, bandwidth=self.args.bandwidth).astype(np.float32)
+                elif self.args.label_type_pt == "persistence_image":
+                    hs = np.concatenate(comp_persistence_image(ph, self.args)).astype(np.float32)
+                else:
+                    print("Unknown label type")
+                    exit()
+                if self.args.cachedir is not None:
+                    np.save(cachefn, hs)
     #        print(hs.shape, hs.max())
 
         # apply image transform

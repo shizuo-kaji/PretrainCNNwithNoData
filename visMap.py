@@ -22,7 +22,7 @@ def visTensor(tensor, ch=0, allkernels=False, nrow=8, padding=1):
 
 if __name__ == "__main__":
     layer = 1
-    model = model_select(args)
+    model = model_select(args, 1)
     kernels = model.conv1.weight.detach().clone()
     print(kernels.size())
 
