@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # Computing Persistent Homology and its histogram
-# By S. Kaji
 
 import os,glob
 import numpy as np
@@ -23,6 +22,7 @@ try:
 except:
     pass
 
+# preprocess image before computing PH
 def preprocess_image(img, gradient=False, img_size=None, filtration=None, origin=(0,0)):
     if len(img.shape)>2:
         im = np.dot(img[...,:3], [0.2989, 0.5870, 0.1140])
@@ -75,6 +75,7 @@ def preprocess_image(img, gradient=False, img_size=None, filtration=None, origin
     else:
         return(im)
 
+## computing PH of an image
 def comp_PH(img, gradient=True, img_size=None, filtration=None):
     im = preprocess_image(img, gradient=gradient, img_size=img_size, filtration=filtration)
     pd = cripser.computePH(im.astype(np.float64))
@@ -88,26 +89,6 @@ def comp_save_PH(fname, args):
     img = np.array(Image.open(fname).convert('L'),dtype=np.float64)
     ph = comp_PH(img, gradient=args.gradient, filtration=args.filtration, img_size=args.img_size)
     np.save(os.path.join(args.output, bfn), ph)
-
-def comp_save_persistence_image(fname, args=None):
-    bfn = os.path.splitext(os.path.basename(fname))[0]
-    img = Image.open(fname).convert('L')
-    img = np.array(img, dtype=np.float64)
-    ph = comp_PH(img, gradient=args.gradient, img_size=args.img_size, filtration=args.filtration)
-    pims = comp_persistence_image(ph, args)
-    np.save(os.path.join(args.output, bfn+"_persImg"), np.concatenate(pims).astype(np.float32))
-    if args.save_fig:
-        sns.lineplot(x=np.arange(len(pims[0])),y=pims[0], legend="full")
-        sns.lineplot(x=np.arange(len(pims[1])),y=pims[1], legend="full",style=True, dashes=[(2,2)])
-        plt.savefig(os.path.join(args.output, bfn+"_persImg.jpg"))
-        plt.close()
-        # plt.imshow(pims[0].reshape(10,5))
-        # plt.savefig(os.path.join(args.output, bfn+"_persImg0.jpg"))
-        # plt.close()
-        # plt.imshow(pims[1].reshape(10,5))
-        # plt.savefig(os.path.join(args.output, bfn+"_persImg1.jpg"))
-        # plt.close()
-    return(pims)
 
 def comp_landscape(ph,  dim, min_birth=None, max_birth=None, max_life=None,n=5):
     res = []
@@ -145,7 +126,7 @@ def comp_persistence_image(ph, args=None):
         pims.append(pi.astype(np.float32))
     return(pims)
 
-def life_curve(ph, dim, min_birth=None, max_birth=None, max_life=None):
+def comp_betticurve(ph, dim, min_birth=None, max_birth=None, max_life=None):
     res = []
     for d in range(2):
         pds = ph[ph[:,0] == d, 1:3]
@@ -159,7 +140,7 @@ def life_curve(ph, dim, min_birth=None, max_birth=None, max_life=None):
     return np.sqrt(np.concatenate(res))
 
 
-def PH_hist(ph, num_bins, min_birth=None, max_birth=None, max_life=None, bandwidth=1):
+def comp_persistence_histogram(ph, num_bins, min_birth=None, max_birth=None, max_life=None, bandwidth=1):
 #    print(args.num_bins)
     pds =[ph[ph[:,0] == i, 1:3] for i in range(2)]
     #print(len(pds[0]),len(pds[1]))
@@ -222,7 +203,7 @@ if __name__== "__main__":
     parser.add_argument('--persImg_power', '-pp', type=float, default=0.5, help='scaling for the vector')
     parser.add_argument('--persImg_weight', '-pn', type=float, default=1.0, help='weight for persistence weighting in persistence image')
     parser.add_argument('--imgtype', '-it', type=str, default=None)
-    parser.add_argument('--type', '-t', type=str, choices=['raw','life_curve','PH_hist','persistence_image','landscape','grid'], help="type of label")
+    parser.add_argument('--type', '-t', type=str, choices=['raw','persistence_betticurve','persistence_histogram','persistence_image','persistence_landscape','grid'], help="type of label")
     parser.add_argument('--filtration', '-f', default='signed_distance', choices=[None,'distance','signed_distance','radial','radial_inv','upward','downward'], help="type of filtration")
     parser.add_argument("--num_workers", '-nw', default=8, type = int, help="num of workers (data_loader)")
     parser.add_argument('--save_fig', '-sf', action="store_true", help="save graphs")
@@ -264,7 +245,7 @@ if __name__== "__main__":
         gfns.extend(glob.glob(os.path.join(target_dir,"**/*.{}".format(it)), recursive=True))
     fns=sorted(list(set(gfns)))
 
-    if args.type == "PH_hist":
+    if args.type == "persistence_histogram":
         print("compute and save persistence histogram...")
         meanPHl0 = np.zeros(args.num_bins[0])
         meanPHl1 = np.zeros(args.num_bins[1])
@@ -278,7 +259,7 @@ if __name__== "__main__":
                 sample = np.array(Image.open(fname).convert('L'),dtype=np.float64)
                 ph = comp_PH(sample, gradient=args.gradient, filtration=args.filtration)
                 np.save(os.path.join(args.output, bfn), ph)
-            hs = PH_hist(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life, bandwidth=args.bandwidth)
+            hs = comp_persistence_histogram(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life, bandwidth=args.bandwidth)
             np.save(os.path.join(args.output, bfn+"_hist"), hs.astype(np.float32))
             c1 = hs[:args.num_bins[0]]
             c2 = hs[args.num_bins[0]:(args.num_bins[0]+args.num_bins[1])]
@@ -308,22 +289,22 @@ if __name__== "__main__":
             sns.lineplot(x=np.arange(len(meanPHb0)),y=meanPHb0, legend="full",linewidth=2.5)
             sns.lineplot(x=np.arange(len(meanPHb1)),y=meanPHb1, legend="full",style=True, dashes=[(2,2)],linewidth=2.5)
             plt.show()
-    elif args.type == "life_curve":
-        print("compute and save life curve...")
+    elif args.type == "persistence_betticurve":
+        print("compute and save betti curve...")
         meanPHl0 = np.zeros(args.num_bins[0])
         meanPHl1 = np.zeros(args.num_bins[1])
         for fname in tqdm(fns, total=len(fns)):
             sample = np.array(Image.open(fname).convert('L'),dtype=np.float64)
             ph = comp_PH(sample, gradient=args.gradient, filtration=args.filtration)
-            res = life_curve(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life)
+            res = comp_betticurve(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life)
             bfn = os.path.splitext(os.path.basename(fname))[0]
-            np.save(os.path.join(args.output, bfn+"_lifeCurve"), res.astype(np.float32))
+            np.save(os.path.join(args.output, bfn+"_bettiCurve"), res.astype(np.float32))
             c1 = res[:args.num_bins[0]]
             c2 = res[args.num_bins[0]:]
             if args.save_fig:
                 sns.lineplot(x=np.arange(len(c1)),y=c1, legend="full")
                 sns.lineplot(x=np.arange(len(c2)),y=c2, legend="full",style=True, dashes=[(2,2)])
-                plt.savefig(os.path.join(args.output, bfn+"_lifeCurve.jpg"))
+                plt.savefig(os.path.join(args.output, bfn+"_bettiCurve.jpg"))
                 plt.close()
             meanPHl0 += c1
             meanPHl1 += c2
@@ -336,11 +317,24 @@ if __name__== "__main__":
             plt.show()
     elif args.type == "persistence_image":
         print("compute and save persistence images...")
-        task = partial(comp_save_persistence_image, args=args)
-        with Pool(args.num_workers) as pool:
-            with tqdm(total=len(fns)) as t:
-                for _ in pool.imap_unordered(task, fns):
-                    t.update(1)
+        for fname in tqdm(fns, total=len(fns)):
+            bfn = os.path.splitext(os.path.basename(fname))[0]
+            img = Image.open(fname).convert('L')
+            img = np.array(img, dtype=np.float64)
+            ph = comp_PH(img, gradient=args.gradient, img_size=args.img_size, filtration=args.filtration)
+            pims = comp_persistence_image(ph, args)
+            np.save(os.path.join(args.output, bfn+"_persImg"), np.concatenate(pims).astype(np.float32))
+            if args.save_fig:
+                sns.lineplot(x=np.arange(len(pims[0])),y=pims[0], legend="full")
+                sns.lineplot(x=np.arange(len(pims[1])),y=pims[1], legend="full",style=True, dashes=[(2,2)])
+                plt.savefig(os.path.join(args.output, bfn+"_persImg.jpg"))
+                plt.close()
+                # plt.imshow(pims[0].reshape(10,5))
+                # plt.savefig(os.path.join(args.output, bfn+"_persImg0.jpg"))
+                # plt.close()
+                # plt.imshow(pims[1].reshape(10,5))
+                # plt.savefig(os.path.join(args.output, bfn+"_persImg1.jpg"))
+                # plt.close()
     elif args.type == "grid":
         from mpl_toolkits.axes_grid1 import make_axes_locatable
         fig = plt.figure(figsize=(21,10),tight_layout=True)
@@ -366,12 +360,12 @@ if __name__== "__main__":
             fig.colorbar(im2, cax=cax, orientation='vertical')
 
             axes[i,3].set_title("LC")
-            res = life_curve(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life)
+            res = comp_betticurve(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life)
             #print(ph)
             sns.lineplot(x=np.arange(args.num_bins[0]),y=res[:args.num_bins[0]], ax=axes[i,3])
             sns.lineplot(x=np.arange(args.num_bins[1]),y=res[args.num_bins[0]:], style=True, dashes=[(2,3)], ax=axes[i,3])
             axes[i,4].set_title("HS")
-            res = PH_hist(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life)
+            res = comp_persistence_histogram(ph, args.num_bins, min_birth=args.min_birth, max_birth=args.max_birth, max_life=args.max_life)
             sns.lineplot(x=np.arange(args.num_bins[0]),y=res[:args.num_bins[0]], ax=axes[i,4])
             sns.lineplot(x=np.arange(args.num_bins[1]),y=res[args.num_bins[0]:(args.num_bins[0]+args.num_bins[1])], style=True, dashes=[(2,2)], ax=axes[i,4])
             sns.lineplot(x=np.arange(args.num_bins[2]),y=res[(args.num_bins[0]+args.num_bins[1]):(args.num_bins[0]+args.num_bins[1]+args.num_bins[2])],linewidth=2.5, ax=axes[i,4])

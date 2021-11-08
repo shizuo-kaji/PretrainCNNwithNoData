@@ -325,25 +325,29 @@ if __name__== "__main__":
     if args.learning_mode == "finetuning":
         dtstr += "_finetuning"
         if args.path2weight is None:
-            dtstr += "_scratch"
+            dtstr += "_Scratch"
         elif "persistence_image" in args.path2weight:
-            dtstr += "_PI"
-        elif "landscape" in args.path2weight:
-            dtstr += "_LS"
-        elif "life_curve" in args.path2weight:
-            dtstr += "_LC"
+            dtstr += "_PH-PI"
+        elif "persistence_landscape" in args.path2weight:
+            dtstr += "_PH-LS"
+        elif "persistence_betticurve" in args.path2weight:
+            dtstr += "_PH-BC"
+        elif "persistence_histogram" in args.path2weight:
+            dtstr += "_PH-HS"
         elif "imagenet" in args.path2weight:
             dtstr += "_IMN"
+        elif "class" in args.path2weight:
+            dtstr += "_Label"
     else:
         grd ="grad_" if args.gradient else ""
         if args.label_type_pt != 'class':
             dtstr += '_{}{}_ml{}_n{}'.format(grd,args.label_type_pt,args.max_life[0],args.numof_dims_pt)
         else:
             dtstr += '_{}{}'.format(grd,args.label_type_pt)
-    if args.dataset_name:
-        dtstr += "_"+args.dataset_name
-    if args.dataset_name_pt and args.learning_mode != "finetuning":
+    if args.dataset_name_pt:
         dtstr += "_"+args.dataset_name_pt
+    if args.dataset_name:
+        dtstr += "_ft-"+args.dataset_name
     if args.suffix:
         dtstr += "_"+args.suffix
 

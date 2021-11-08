@@ -25,14 +25,14 @@ def model_select(args, outdim):
 	if (args.path2weight == "imagenet"):
 		pretrained = True
 		args.numof_pretrained_classes = 1000
-		print("use imagenet pretrained model")
+		print("using imagenet pretrained model")
 	else:
 		if args.path2weight is None:
-			print("weight file {} not found: train from scratch!\n".format(args.path2weight))
+			print("weight file {} not found: training from scratch!\n".format(args.path2weight))
 			args.numof_pretrained_classes = outdim
 			train_from_scratch = True
 		elif os.path.exists(args.path2weight):
-			print ("use pretrained model : {}".format(args.path2weight))
+			print ("using pretrained model : {}".format(args.path2weight))
 			param = torch.load(args.path2weight, map_location=lambda storage, loc: storage)
 			if param and "fc.bias" in param:
 				args.numof_pretrained_classes = param["fc.bias"].shape[0]

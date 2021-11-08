@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-# Generating random images with a bump frequency profile
-# By S. Kaji
+# Generating random images with a decaying frequency profile
 
 #%%
 import numpy as np

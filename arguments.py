@@ -18,10 +18,10 @@ def arguments():
     parser.add_argument('--resume', default='', type=str, help='path to checkpoint file to resume')
 
     # image generator
-    parser.add_argument("--alpha_range", '-ar', default=[0.01,2.5], type = float, nargs=2, help="synthesised image frequency pattern")
+    parser.add_argument("--alpha_range", '-ar', default=[1,1], type = float, nargs=2, help="synthesised image frequency pattern")
     parser.add_argument("--beta_range", '-br', default=[1,2], type = float, nargs=2, help="synthesised image frequency pattern")
-    parser.add_argument("--n_samples", '-n', default=50000, type = int, help="number of images generated for training")
-    parser.add_argument("--n_samples_val", '-nv', default=5000, type = int, help="number of images generated for validation")
+    parser.add_argument("--n_samples", '-n', default=200000, type = int, help="number of images generated for training")
+    parser.add_argument("--n_samples_val", '-nv', default=1000, type = int, help="number of images generated for validation")
     parser.add_argument("--prob_binary", '-pb', default=0.5, type = float, help="probability of binarising the generated image")
     parser.add_argument("--prob_colour", '-pc', default=0.5, type = float, help="probability of generating colour images")
     # persistent homology (label) parameter
@@ -33,12 +33,11 @@ def arguments():
     parser.add_argument('--persImg_sigma', '-ps', type=float, default=1, help='sigma for the gaussian kernel in persistence image')
     parser.add_argument('--persImg_power', '-pp', type=float, default=0.5, help='scaling for the vector')
     parser.add_argument('--persImg_weight', '-pn', type=float, default=1.0, help='weight for persistence weighting in persistence image')
-    parser.add_argument('--num_landscapes', type=int, default=5, help='number of landscapes for persistence landscape')
-    parser.add_argument('--label_type_pt', '-lt', default="persistence_image", choices=['raw','life_curve','PH_hist','persistence_image','landscape','class'], help='label type for the pretraining task')
+    parser.add_argument('--num_landscapes', type=int, default=2, help='number of landscapes for persistence landscape')
+    parser.add_argument('--label_type_pt', '-lt', default="persistence_image", choices=['raw','persistence_betticurve','persistence_histogram','persistence_image','persistence_landscape','class'], help='label type for the pretraining task')
     parser.add_argument('--persistence_after_transform', '-pat', action="store_true", help='PH computation after applying transformation')
     parser.add_argument('--filtration', '-f', default='signed_distance', choices=[None,'distance','signed_distance','radial','radial_inv','upward','downward'], help="type of filtration")
     parser.add_argument('--gradient', '-g', action="store_true", default=False, help="apply gradient filter")
-    parser.add_argument('--greyscale', '-gr', action="store_true", default=False, help="make loaded image greyscale")
 
     # network settings
     parser.add_argument("--usenet", '-u', default="resnet50", type = str, help="network architecture")
@@ -86,7 +85,7 @@ def arguments():
             args.min_birth = [0,0]
 
     # set PH regression output dimensions
-    if args.label_type_pt in ["life_curve","landscape"]:
+    if args.label_type_pt in ["persistence_betticurve","persistence_landscape"]:
         args.num_bins = [args.numof_dims_pt//2,args.numof_dims_pt-args.numof_dims_pt//2]
     elif args.label_type_pt == "persistence_image":
         args.num_bins = [args.numof_dims_pt//2,args.numof_dims_pt//2]
@@ -99,7 +98,7 @@ def arguments():
                 p = int((args.max_birth[d]-args.min_birth[d])/s)
                 q = int(args.max_life[d]/s)
             #print(p,q,p*q)
-    elif args.label_type_pt == "PH_hist":
+    elif args.label_type_pt == "persistence_histogram":
         if args.gradient:
             b = args.numof_dims_pt//3
             args.num_bins = [b,b,1,args.numof_dims_pt-2*b-1]

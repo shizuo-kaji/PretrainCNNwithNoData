@@ -11,7 +11,7 @@ import numpy as np
 from scipy.fft import fft2, ifft2
 from skimage.filters import threshold_otsu
 
-from PHdict import comp_PH, PH_hist, life_curve, comp_persistence_image, comp_landscape
+from PHdict import comp_PH, comp_persistence_histogram, comp_betticurve, comp_persistence_image, comp_landscape
 from random_image import generate_random_image
 
 class DatasetFolderPH(VisionDataset):
@@ -87,12 +87,12 @@ class DatasetFolderPH(VisionDataset):
                 else:
                     ph = np.load(os.path.join(self.args.path2PHdir, os.path.splitext(os.path.basename(path))[0]+".npy"))
                 # PH vectorisation
-                if self.args.label_type_pt == "life_curve":
-                    hs = life_curve(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life).astype(np.float32)
-                elif self.args.label_type_pt == "landscape":  ## num, max_time
+                if self.args.label_type_pt == "persistence_betticurve":
+                    hs = comp_betticurve(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life).astype(np.float32)
+                elif self.args.label_type_pt == "persistence_landscape":  ## num, max_time
                     hs = comp_landscape(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life, n=2).astype(np.float32)
-                elif self.args.label_type_pt == "PH_hist":
-                    hs = PH_hist(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life, bandwidth=self.args.bandwidth).astype(np.float32)
+                elif self.args.label_type_pt == "persistence_histogram":
+                    hs = comp_persistence_histogram(ph, self.args.num_bins, min_birth=self.args.min_birth, max_birth=self.args.max_birth, max_life=self.args.max_life, bandwidth=self.args.bandwidth).astype(np.float32)
                 elif self.args.label_type_pt == "persistence_image":
                     hs = np.concatenate(comp_persistence_image(ph, self.args)).astype(np.float32)
                 else:

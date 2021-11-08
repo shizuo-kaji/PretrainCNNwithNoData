@@ -16,12 +16,12 @@ import argparse
 
 class ExpansionDataset(object):
     '''docstring for ClassName'''
-    def __init__(self, dataset_name, raw_path, data_path):
-        print(dataset_name)
-        self.dataset_name = dataset_name
-        self.raw_path = os.path.expanduser(raw_path)
-
-        self.data_path = os.path.expanduser(data_path)
+    def __init__(self, args):
+        print(args.dataset)
+        self.dataset_name = args.dataset
+        self.raw_path = os.path.expanduser(args.raw_file_path)
+        self.data_path = os.path.expanduser(args.data_file_path)
+        self.validation_ratio = args.validation_ratio
         self.download_dict = get_url(self.dataset_name)
 
     def download(self):
@@ -35,7 +35,7 @@ class ExpansionDataset(object):
             decompress_file(filename, self.raw_path)
 
     def setup(self):
-        setup_file(self.dataset_name, self.raw_path, self.data_path)
+        setup_file(self.dataset_name, self.raw_path, self.data_path, self.validation_ratio)
 
 
 def get_url(dataset_name):
@@ -64,8 +64,13 @@ def get_url(dataset_name):
                                     'brendenlake/omniglot/master/python/',
                          'filenames': ['images_background.zip',
                                        'images_evaluation.zip']},
+            'animal': {'baseurl': 'http://xiang.bai.googlepages.com/'
+                                    '',
+                         'filenames': ['non_rigid_shape_A.zip',
+                                       'non_rigid_shape_B.zip']},
             }
     return data[dataset_name]
+        
 
 
 def progress(block_count, block_size, total_size):
@@ -104,7 +109,7 @@ def decompress_file(filename, raw_path):
             z.extractall(os.path.join(raw_path, ''))
 
 
-def setup_file(dataset_name, raw_path, data_path):
+def setup_file(dataset_name, raw_path, data_path, validation_ratio):
     exist_mkdir(os.path.join(data_path, dataset_name))
     if dataset_name == 'CIFAR10':
         setup_cifar10(dataset_name, raw_path, data_path)
@@ -120,6 +125,8 @@ def setup_file(dataset_name, raw_path, data_path):
         setup_caltech256(dataset_name, raw_path, data_path)
     elif dataset_name == 'omniglot':
         setup_omniglot(dataset_name, raw_path, data_path)
+    elif dataset_name == 'animal':
+        setup_animal(dataset_name, raw_path, data_path, validation_ratio)
 
 
 def exist_mkdir(path):
@@ -401,31 +408,42 @@ def caltech256_list():
 
 def conf():
     parser = argparse.ArgumentParser(description='Image Recognition Dataset')
-    parser.add_argument('--dataset', default='CIFAR10',
+    parser.add_argument('--dataset', '-d', default='',
                         type=str, help='select dataset')
     parser.add_argument('--raw_file_path', default='',
-                        type=str, help='select dataset')
-    parser.add_argument('--data_file_path', default='data',
-                            type=str, help='select dataset')
+                        type=str, help='temporary path')
+    parser.add_argument('--data_file_path', '-o', default='data',
+                            type=str, help='output path')
+    parser.add_argument('--validation_ratio', '-r', default=0.2,
+                            type=float, help='ratio for the validation split for animal dataset')
     args = parser.parse_args()
     return args
 
 
+###
+def setup_animal(dataset_name, raw_path, data_path, val_ratio=0.2):
+    dst_root = os.path.join(data_path, dataset_name)
+    exist_mkdir(os.path.join(dst_root, 'train'))
+    exist_mkdir(os.path.join(dst_root, 'test'))
+    for mode in ['non_rigid_shape_A','non_rigid_shape_B']:
+        for dn in os.listdir(os.path.join(raw_path,mode)):
+            src = os.path.join(raw_path,mode,dn)
+            if os.path.isdir(src):
+                exist_mkdir(os.path.join(dst_root, 'train', dn))
+                exist_mkdir(os.path.join(dst_root, 'test', dn))
+                fns = sorted(os.listdir(src))
+                for i,fn in enumerate(fns):
+                    if i < (1-val_ratio)*len(fns):
+                        shutil.copy(os.path.join(src,fn),os.path.join(dst_root, 'train', dn))
+                    else:
+                        shutil.copy(os.path.join(src,fn),os.path.join(dst_root, 'test', dn))
+
+
 if __name__ == '__main__':
     args = conf()
-    assert args.dataset == 'CIFAR10'or \
-        args.dataset == 'CIFAR100' or \
-        args.dataset == 'MNIST' or \
-        args.dataset == 'fashionMNIST' or \
-        args.dataset == 'omniglot' or \
-        args.dataset == 'caltech101' or \
-        args.dataset == 'caltech256', \
-        'select CIFAR10/100, MNIST/fashionMNIST, omniglot, caltech101/256'
     if not args.raw_file_path:
         args.raw_file_path = args.dataset
-    worker = ExpansionDataset(args.dataset,
-                              args.raw_file_path,
-                              args.data_file_path)
+    worker = ExpansionDataset(args)
     # Download files
     worker.download()
     # Extract unzip files
