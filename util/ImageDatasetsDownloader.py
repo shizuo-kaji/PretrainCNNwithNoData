@@ -1,4 +1,5 @@
-# https://github.com/chatflip/ImageRecognitionDataset
+#
+# This is a modified version of the code available at https://github.com/chatflip/ImageRecognitionDataset
 # 
 import gzip
 import os

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Generating random images with a decaying frequency profile
+# Generating random images with a decaying frequency profile in the fourier domain
 
 #%%
 import numpy as np
@@ -13,6 +13,7 @@ from tqdm import tqdm
 import argparse
 from multiprocessing import Pool
 from functools import partial
+from arguments import arguments
 
 def generate_and_save_random_image(idx, args=None, outdir=None, prefix=""):
     #np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
@@ -63,20 +64,7 @@ def generate_random_image(args, require_at_least_one_binary=False):
 
 #%%
 if __name__== "__main__":
-    parser = argparse.ArgumentParser(description="generate random images in the fourier domain")
-    # paths
-    parser.add_argument("--output", '-o', default=None, type = str, help="path to output images")
-    parser.add_argument("--prefix", '-pf', default="", type = str, help="prefix to the filename")
-    # image generator
-    parser.add_argument("--alpha_range", '-ar', default=[0,1], type = float, nargs=2, help="")
-    parser.add_argument("--beta_range", '-br', default=[1,2], type = float, nargs=2, help="")
-    parser.add_argument("--n_samples", '-n', default=200000, type = int, help="number of images")
-    parser.add_argument("--n_samples_val", '-nv', default=5000, type = int, help="number of images for validation")
-    parser.add_argument("--img_size", '-is', default=256, type = int, help="image size")
-    parser.add_argument("--num_workers", '-nw', default=8, type = int, help="num of workers")
-    parser.add_argument("--prob_colour", '-pc', default=0.5, type = float,  help="")
-    parser.add_argument("--prob_binary", '-pb', default=0.5, type = float, help="probability of binarising the generated image")
-    args = parser.parse_args()
+    args = arguments(mode="random_image")
 
     if args.output is None:
         args.output = "random{}kpb{}pc{}a{}-{}b{}-{}".format(args.n_samples//1000,args.prob_binary,args.prob_colour,args.alpha_range[0],args.alpha_range[1],args.beta_range[0],args.beta_range[1])
@@ -91,7 +79,7 @@ if __name__== "__main__":
         nsmp = [args.n_samples,args.n_samples_val]
     else:
         phases = ["."]
-        prefix = [args.prefix]
+        prefix = [""]
         nsmp = [args.n_samples]
     for k,phase in enumerate(phases):
         n = nsmp[k]

@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 # Computing Persistent Homology and its histogram
+## install cripser by
+## pip install git+https://github.com/shizuo-kaji/CubicalRipser_3dim
 
 import os,glob
 import numpy as np
@@ -9,43 +11,62 @@ import matplotlib.pyplot as plt
 from sklearn.neighbors import KernelDensity
 from scipy.stats import gaussian_kde
 import argparse,json
-import cripser
 from scipy.ndimage.morphology import distance_transform_edt
 from skimage import feature,morphology
-from skimage.filters import threshold_otsu, scharr
+from skimage.filters import threshold_otsu, threshold_niblack,threshold_sauvola, scharr
 from PIL import Image
 from multiprocessing import Pool
 from functools import partial
+from arguments import arguments
 try:
     import persim
+    import cripser
     from gudhi.representations import Landscape
 except:
     pass
 
 # preprocess image before computing PH
-def preprocess_image(img, gradient=False, img_size=None, filtration=None, origin=(0,0)):
-    if len(img.shape)>2:
-        im = np.dot(img[...,:3], [0.2989, 0.5870, 0.1140])
-    else:
-        im = img
+def preprocess_image(img, gradient=False, img_size=None, filtration=None, origin=(0,0), binarisation='otsu'):
+    im = img
 
     if img_size:
         import skimage.transform
         im = skimage.transform.resize(im,(img_size,img_size))
 
     if gradient:
+        import cv2
         #im = feature.canny(im, sigma=10)
-        im = scharr(im)
+        #im = scharr(im)
+        if len(im.shape)==2: # temporaly convert to BGR to use cv2 functions
+            im = cv2.cvtColor(im,cv2.COLOR_GRAY2BGR)
+        denoised = cv2.fastNlMeansDenoisingColored(im, None, 30, 10, 7, 21)
+        im = cv2.cvtColor(denoised, cv2.COLOR_BGR2GRAY)
+        v = np.median(im)
+        sigma = 0.9 # 0.33
+        lower = int(max(0, (1.0 - sigma) * v))
+        upper = int(min(255, (1.0 + sigma) * v))
+        im = cv2.Canny(im, lower, upper)
+    
+    if len(im.shape)>2:
+        im = np.dot(im[...,:3], [0.2989, 0.5870, 0.1140])
 
     if filtration is not None:
         if im.max()==im.min():
             return(np.zeros_like(im))
-        bw_img = (im >= threshold_otsu(im))
+        if gradient:
+            bw_img = im
+        else:
+            if binarisation=='sauvola':
+                bw_img = (im >=threshold_sauvola(im))
+            elif binarisation=='niblack':
+                bw_img = (im >= threshold_niblack(im))            
+            else:           
+                bw_img = (im >= threshold_otsu(im))
         #bw_img = morphology.area_opening(bw_img, area_threshold=8, connectivity=2)
 
         if filtration=='binarise':
             return(bw_img)
-        if filtration == 'distance':
+        elif filtration == 'distance':
             dt_img = distance_transform_edt(~bw_img) # distance from the foreground 0
             #print(dt_img.max())
         elif filtration == 'signed_distance':
@@ -191,35 +212,8 @@ def kern_smooth(y, bandwidth=11, kern='flat'):
     return(res[c:(c+len(y))])
 
 if __name__== "__main__":
-    parser = argparse.ArgumentParser("")
-    parser.add_argument('target_dir',type=str)
-    parser.add_argument('--output', '-o', default=None)
-    parser.add_argument('--max_life', '-ml', type=int, nargs=2, default=[50,50])
-    parser.add_argument('--max_birth', '-maxb', type=int, nargs=2, default=None)
-    parser.add_argument('--min_birth', '-minb', type=int, nargs=2, default=None)
-    parser.add_argument('--num_bins', '-n', type=int, nargs="*", default=[50,50,50,50])
-    parser.add_argument('--bandwidth', '-b', type=int, default=1)
-    parser.add_argument('--persImg_sigma', '-ps', type=float, default=1)
-    parser.add_argument('--persImg_power', '-pp', type=float, default=0.5, help='scaling for the vector')
-    parser.add_argument('--persImg_weight', '-pn', type=float, default=1.0, help='weight for persistence weighting in persistence image')
-    parser.add_argument('--imgtype', '-it', type=str, default=None)
-    parser.add_argument('--type', '-t', type=str, choices=['raw','persistence_betticurve','persistence_histogram','persistence_image','persistence_landscape','grid'], help="type of label")
-    parser.add_argument('--filtration', '-f', default='signed_distance', choices=[None,'distance','signed_distance','radial','radial_inv','upward','downward'], help="type of filtration")
-    parser.add_argument("--num_workers", '-nw', default=8, type = int, help="num of workers (data_loader)")
-    parser.add_argument('--save_fig', '-sf', action="store_true", help="save graphs")
-    parser.add_argument('--gradient', '-g', action="store_true", default=False, help="apply gradient filter")
-    parser.add_argument("--img_size", '-is', default=None, type = int, help="input images will be resized initially")
 
-    args = parser.parse_args()
-	# adjustment w.r.t. the possible minimum value for the image
-    if args.max_birth is None:
-        args.max_birth = [args.max_life[0],args.max_life[1]]
-
-    if args.min_birth is None:
-        if args.filtration=='signed_distance':
-            args.min_birth = [-args.max_life[0],-args.max_life[1]]
-        else:
-            args.min_birth = [0,0]
+    args = arguments(mode="PHdict")
 
     grad = "grad" if args.gradient else ""
     if args.output is None:
@@ -240,12 +234,12 @@ if __name__== "__main__":
     with open(os.path.join(args.output, "args.json"), mode="w") as f:
         json.dump(args.__dict__, f, indent=4)
     gfns = []
-    imgtypes = [args.imgtype] if args.imgtype else ['png','PNG','jpg','JPG','tif','TIF','tiff','TIFF']
+    imgtypes = ['png','PNG','jpg','JPG','tif','TIF','tiff','TIFF']
     for it in imgtypes:
         gfns.extend(glob.glob(os.path.join(target_dir,"**/*.{}".format(it)), recursive=True))
     fns=sorted(list(set(gfns)))
 
-    if args.type == "persistence_histogram":
+    if args.label_type_pt == "persistence_histogram":
         print("compute and save persistence histogram...")
         meanPHl0 = np.zeros(args.num_bins[0])
         meanPHl1 = np.zeros(args.num_bins[1])
@@ -289,7 +283,7 @@ if __name__== "__main__":
             sns.lineplot(x=np.arange(len(meanPHb0)),y=meanPHb0, legend="full",linewidth=2.5)
             sns.lineplot(x=np.arange(len(meanPHb1)),y=meanPHb1, legend="full",style=True, dashes=[(2,2)],linewidth=2.5)
             plt.show()
-    elif args.type == "persistence_betticurve":
+    elif args.label_type_pt == "persistence_betticurve":
         print("compute and save betti curve...")
         meanPHl0 = np.zeros(args.num_bins[0])
         meanPHl1 = np.zeros(args.num_bins[1])
@@ -315,7 +309,7 @@ if __name__== "__main__":
             sns.lineplot(x=np.arange(len(meanPHl0)),y=meanPHl0, legend="full")
             sns.lineplot(x=np.arange(len(meanPHl1)),y=meanPHl1, legend="full",style=True, dashes=[(2,2)])
             plt.show()
-    elif args.type == "persistence_image":
+    elif args.label_type_pt == "persistence_image":
         print("compute and save persistence images...")
         for fname in tqdm(fns, total=len(fns)):
             bfn = os.path.splitext(os.path.basename(fname))[0]
@@ -335,20 +329,19 @@ if __name__== "__main__":
                 # plt.imshow(pims[1].reshape(10,5))
                 # plt.savefig(os.path.join(args.output, bfn+"_persImg1.jpg"))
                 # plt.close()
-    elif args.type == "grid":
+    elif args.label_type_pt == "grid":
         from mpl_toolkits.axes_grid1 import make_axes_locatable
         fig = plt.figure(figsize=(21,10),tight_layout=True)
-        n = min(len(fns),10)
+        n = min(len(fns),6)
         axes = fig.subplots(n, 6)
         for i in tqdm(range(n)):
             fname = fns[i]
-            colour = Image.open(fname)
-            sample = (np.array(colour.convert('L'),dtype=np.float64))
+            sample = np.array(Image.open(fname))
             mask = preprocess_image(sample, gradient=args.gradient, filtration='binarise', img_size=args.img_size) ## used only for preview
             dt = preprocess_image(sample, gradient=args.gradient, filtration=args.filtration, img_size=args.img_size)
             print(dt.min(),dt.max())
             ph = comp_PH(sample, gradient=args.gradient, filtration=args.filtration, img_size=args.img_size)
-            axes[i,0].imshow(colour)
+            axes[i,0].imshow(sample)
             axes[i,0].set_axis_off()
             axes[i,0].set_title(os.path.basename(fns[i]))
             axes[i,1].imshow(mask)

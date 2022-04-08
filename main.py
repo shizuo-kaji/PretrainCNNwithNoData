@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
+
 import os,random,glob,time,shutil
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
 import json,gc
 import numpy as np
 from PIL import Image
@@ -38,42 +41,50 @@ class Experiment:
             self.logger = SummaryWriter(self.log_dir)
 
 def worker_init_fn(worker_id):
-    random.seed(worker_id+args.seed)
+    np.random.seed(np.random.get_state()[1][0] + worker_id)
 
 def dpp_train(rank, world_size, args, mode="", exp=None):
     # setup parallelisation environment
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     # create default process group
-    if args.pidf == "nccl":
-        os.environ['MASTER_ADDR'] = 'localhost'
-        os.environ['MASTER_PORT'] = '8888'
-        dist.init_process_group("nccl", rank=rank, world_size=world_size) # , init_method=pid)
+    if args.dist_backend == "nccl":
+        # os.environ['MASTER_ADDR'] = 'localhost'
+        # os.environ['MASTER_PORT'] = '8888'
+        dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url, rank=rank, world_size=world_size)
         torch.cuda.set_device(rank)
         args.batch_size = int(args.batch_size / args.world_size)
         args.num_workers = int((args.num_workers + args.world_size - 1) / args.world_size)
-    elif args.pidf == "gloo":
+    elif args.dist_backend == "gloo":
         pidf = os.path.join(args.output,"temp") ## check write permission!
         if os.path.isfile(pidf):
             os.remove(pidf)
-        pid = "file:///{}".format(pidf)  
+        pid = "file:///{}".format(pidf)
         dist.init_process_group("gloo", rank=rank, world_size=world_size, init_method=pid)
         torch.cuda.set_device(rank)
         args.batch_size = int(args.batch_size / args.world_size)
         args.num_workers = int((args.num_workers + args.world_size - 1) / args.world_size)
-    elif args.pidf == "DPP":
+    elif args.dist_backend is None:
         pass
     else:
         print("Unknown parallelisation backend")
         exit()
     if rank == 0:
         print("Phase: ", mode)
-        print("paralell trainer: ",args.pidf)
+        print("paralell trainer: ",args.dist_backend)
         exp.setup_logger()
 
     # training dataset
-    train_data_path = args.train_pt if mode=="pretraining" else args.train
-    val_data_path = args.val_pt if mode=="pretraining" else args.val
+    if mode=="pretraining":
+        train_data_path = args.train_pt
+        val_data_path = args.val_pt
+    elif mode=="evaluation":
+        train_data_path = args.val
+        val_data_path = args.val
+        args.epochs=1
+    else:
+        train_data_path = args.train
+        val_data_path = args.val
 
     # training transform
     img_size = args.img_size_pt if mode=="pretraining" else args.img_size
@@ -83,17 +94,34 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
         #normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         normalize = transforms.Normalize(mean=[x / 255.0 for x in [125.3, 123.0, 113.9]],
                                         std=[x / 255.0 for x in [63.0, 62.1, 66.7]])
-    train_transform = transforms.Compose([])
-    if img_size > args.crop_size:
-        train_transform.transforms.append(transforms.Resize(img_size, interpolation=transforms.InterpolationMode.BILINEAR))
-    if args.affine:
-        train_transform.transforms.append(transforms.RandomAffine(degrees=(-180,180), scale=(0.5,2), shear=(-100,100,-100,100)))
-    if args.random_scale > 0:
-        train_transform.transforms.append(transforms.RandomResizedCrop(args.crop_size,scale=(1.0-3*args.random_scale,1.0)))
-    train_transform.transforms.append(transforms.RandomCrop(args.crop_size, padding=args.crop_padding))
-    train_transform.transforms.append(transforms.RandomHorizontalFlip())
-    train_transform.transforms.append(transforms.ToTensor())
-    train_transform.transforms.append(normalize)
+
+    if args.aug_plus:
+        # MoCo v2's aug: similar to SimCLR https://arxiv.org/abs/2002.05709
+        train_transform = transforms.Compose([
+            transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
+            transforms.RandomApply([
+                transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)  # not strengthened
+            ], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.RandomApply([transforms.GaussianBlur(5)], p=0.5),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize
+        ])
+    else:
+        train_transform = transforms.Compose([])
+        if args.random_scale > 0:
+            train_transform.transforms.append(transforms.RandomResizedCrop(args.crop_size,scale=(1.0-args.random_scale,1.0)))
+        elif img_size > args.crop_size:
+            train_transform.transforms.append(transforms.Resize(img_size, interpolation=transforms.InterpolationMode.BILINEAR))
+        if args.random_rotation > 0:
+            train_transform.transforms.append(transforms.RandomRotation(args.random_rotation))
+        if args.affine:
+            train_transform.transforms.append(transforms.RandomAffine(degrees=(-180,180), scale=(0.5,2), shear=(-100,100,-100,100)))
+        train_transform.transforms.append(transforms.RandomCrop(args.crop_size, padding=args.crop_padding))
+        train_transform.transforms.append(transforms.RandomHorizontalFlip())
+        train_transform.transforms.append(transforms.ToTensor())
+        train_transform.transforms.append(normalize)
 
     # dataset loading
     if args.learning_mode == "simultaneous": # use a single dataset but with two tasks: classification and PH
@@ -105,7 +133,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
         parts = [(0,numof_classes),(numof_classes,outdim)]
         criterions=[nn.CrossEntropyLoss(reduction='mean').to(rank),nn.MSELoss(reduction='mean').to(rank)]
     else:
-        if args.label_type_pt == "class" or mode == "finetuning":
+        if args.label_type_pt == "class" or mode in ["finetuning","evaluation"]:
             train_datasets = [datasets.ImageFolder(train_data_path, transform=train_transform)]
             outdim = len(train_datasets[0].classes)
             if rank == 0:
@@ -119,6 +147,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
                 # caching
                 if args.cachedir is not None:
                     if os.path.exists(args.cachedir):
+                        print("clearning cache in {}".format(args.cachedir))
                         shutil. rmtree(args.cachedir)
                     os.makedirs(args.cachedir,exist_ok=True)
                     if train_data_path=="generate":
@@ -126,7 +155,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
                         os.makedirs(os.path.join(args.cachedir,'val'),exist_ok=True)
                     print("PH computation will be cached in ",args.cachedir)
             if train_data_path=="generate":
-                imdir = os.path.join(args.cachedir,'train') if args.cachedir is not None else ""
+                imdir = os.path.join(args.cachedir,'train') if args.cachedir is not None else "train"
                 train_datasets = [DatasetFolderPH(root=imdir, transform=train_transform, generate_on_the_fly=True, args=args)]
                 if rank == 0:
                     print(len(train_datasets[0]), "training images are generated on the fly.")
@@ -155,16 +184,16 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
         Image.fromarray(img).save(os.path.join(args.output,"{:0>5}.jpg".format(i)))
 
     # data sampler
-    if args.pidf in ["nccl","gloo"]:
+    if args.dist_backend in ["nccl","gloo"]:
         train_samplers = [torch.utils.data.distributed.DistributedSampler(train_datasets[0],num_replicas=world_size,rank = rank)]
-        train_loaders = [torch.utils.data.DataLoader(train_datasets[0], batch_size=args.batch_size, shuffle=False, 
+        train_loaders = [torch.utils.data.DataLoader(train_datasets[0], batch_size=args.batch_size, shuffle=False,
                                     num_workers=args.num_workers, pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn, sampler = train_samplers[0])]
         if args.learning_mode == "alternating":
             train_samplers.append(torch.utils.data.distributed.DistributedSampler(train_datasets[1],num_replicas=world_size,rank = rank))
             train_loaders.append(torch.utils.data.DataLoader(train_datasets[1], batch_size=args.batch_size, shuffle=False,
                                       num_workers=args.num_workers, pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn, sampler = train_samplers[1]))
     else:
-        train_loaders = [torch.utils.data.DataLoader(dataset=train_datasets[0], batch_size=args.batch_size,shuffle=True, 
+        train_loaders = [torch.utils.data.DataLoader(dataset=train_datasets[0], batch_size=args.batch_size,shuffle=True,
                                             num_workers=args.num_workers,pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn)]
         if args.learning_mode == "alternating":
             train_loaders.append(torch.utils.data.DataLoader(dataset=train_datasets[1], batch_size=args.batch_size,shuffle=True,
@@ -179,8 +208,10 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
         test_transform.transforms.append(transforms.CenterCrop(args.crop_size))
         test_transform.transforms.append(transforms.ToTensor())
         test_transform.transforms.append(normalize)
-        if args.label_type_pt == "class" or mode == "finetuning":
+        if args.label_type_pt == "class" or mode in ["finetuning","evaluation"]:
             test_datasets = [datasets.ImageFolder(val_data_path, transform=test_transform)]
+            if rank == 0:
+                print(len(test_datasets[0]), f"first validation images loaded from {val_data_path}.")
         else:
             if val_data_path=="generate":
                 imdir = os.path.join(args.cachedir,'val') if args.cachedir is not None else ""
@@ -190,7 +221,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
             else:
                 test_datasets = [DatasetFolderPH(val_data_path, transform=test_transform,args=args)]
                 if rank == 0:
-                    print(len(test_datasets[0]), "first validation images loaded.")
+                    print(len(test_datasets[0]), f"first validation images loaded from {val_data_path}.")
 
         test_loaders = [torch.utils.data.DataLoader(test_datasets[0], batch_size=args.batch_size, shuffle=False,
                                                  num_workers=args.num_workers, pin_memory=True, drop_last=False, worker_init_fn=worker_init_fn)]
@@ -202,9 +233,13 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
                 print(len(test_datasets[1]), "second validation images loaded.")
 
     # setup model and optimiser
-    model = model_select(args, outdim)
+    if args.learning_mode == "evaluation":
+        model = model_select(args, outdim, renew_fc=False)
+    else:
+        model = model_select(args, outdim)
+
     if args.world_size != 1:
-        if args.pidf in ["nccl","gloo"]:
+        if args.dist_backend in ["nccl","gloo"]:
             model = DDP(model.to(rank), device_ids=[rank],output_device=rank)
         else:
             model = nn.DataParallel(model)
@@ -224,7 +259,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
         print("using Adam.")
 
     if "cos" in args.optimizer:
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
         print("using cosine annealing.")
     else:
         if args.epochs == 200: # TEMP: resnet18
@@ -236,7 +271,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
 
     # checkpointing
     if args.resume:
-        if args.pidf in ["nccl","gloo"]:
+        if args.dist_backend in ["nccl","gloo"]:
             dist.barrier()
             map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
             checkpoint = torch.load(args.resume, map_location=map_location)
@@ -254,11 +289,14 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
     for epoch in range(args.start_epoch, args.epochs + 1):
         if args.learning_mode != "simultaneous":
             for i in range(len(criterions)):
-                if args.pidf in ["nccl","gloo"]:
-                    train_samplers[i].set_epoch(epoch)
-                    loss, acc, _ = train(args, model, rank, train_loaders[i], optimizer, epoch, [criterions[i]], part=parts[i], quiet=(rank!=0))
+                if args.learning_mode == "evaluation":
+                    loss, acc = 0,0
                 else:
-                    loss, acc, _ = train(args, model, device, train_loaders[i], optimizer, epoch, [criterions[i]], part=parts[i])
+                    if args.dist_backend in ["nccl","gloo"]:
+                        train_samplers[i].set_epoch(epoch)
+                        loss, acc, _ = train(args, model, rank, train_loaders[i], optimizer, epoch, [criterions[i]], part=parts[i], quiet=(rank!=0))
+                    else:
+                        loss, acc, _ = train(args, model, device, train_loaders[i], optimizer, epoch, [criterions[i]], part=parts[i])
                 if rank == 0 and val_data_path is not None:
                     validation_loss, validation_accuracy, _ = validate(args, model, device, test_loaders[i], [criterions[i]], part=parts[i])
                     if i==0 and mode != "pretraining":
@@ -271,7 +309,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
                         exp.logger.add_scalar("Loss/train2", loss, epoch)
                         exp.logger.add_scalar("Loss/val2", validation_loss, epoch)
         else: #simultaneous
-            if args.pidf in ["nccl","gloo"]:
+            if args.dist_backend in ["nccl","gloo"]:
                 train_samplers[0].set_epoch(epoch)
                 loss, acc, loss2 = train(args, model, rank, train_loaders[0], optimizer, epoch, criterions, part=parts, quiet=(rank!=0))
             else:
@@ -285,9 +323,9 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
                 exp.logger.add_scalar("Acc/val", validation_accuracy, epoch)
                 exp.logger.add_scalar("Loss/train2", loss2, epoch)
                 exp.logger.add_scalar("Loss/val2", validation_loss2, epoch)
-                        
+
         scheduler.step()
-        if ((args.save_interval>0 and epoch % args.save_interval == 0) or epoch == args.epochs) and rank==0:
+        if ((args.save_interval>0 and epoch % args.save_interval == 0) or epoch == args.epochs) and rank==0 and args.learning_mode != "evaluation":
             print("saving checkpoint...")
             if args.world_size>1:
                 model_state = model.module.state_dict()
@@ -303,7 +341,7 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
                         'optimizer' : optimizer.state_dict(),
                         'scheduler' : scheduler.state_dict(),}, checkpoint)
 
-    if args.pidf in ["nccl","gloo"]:
+    if args.dist_backend in ["nccl","gloo"]:
         dist.destroy_process_group()
 
     model_type = "pt" if mode=="pretraining" else args.learning_mode
@@ -316,9 +354,13 @@ def dpp_train(rank, world_size, args, mode="", exp=None):
 if __name__== "__main__":
 
     # number of GPUs
-    if torch.cuda.device_count() <= 1:
+    ngpus_per_node = torch.cuda.device_count()
+    if args.world_size is None:
+        args.world_size = max(ngpus_per_node,1)
+    if ngpus_per_node <= 1 or args.learning_mode == "evaluation":
         #print(torch.cuda.device_count(), "GPUs available")
         args.world_size = 1
+        args.dist_backend = None
 
     # create directories for log and output
     dtstr = dt.now().strftime('%Y_%m%d_%H%M')
@@ -334,6 +376,8 @@ if __name__== "__main__":
             dtstr += "_PH-BC"
         elif "persistence_histogram" in args.path2weight:
             dtstr += "_PH-HS"
+        elif "Fractal" in args.path2weight:
+            dtstr += "_FDB"
         elif "imagenet" in args.path2weight:
             dtstr += "_IMN"
         elif "class" in args.path2weight:
@@ -353,7 +397,7 @@ if __name__== "__main__":
 
     args.logdir = os.path.join(os.path.dirname(__file__),"runs/{}/{}".format(socket.gethostname(),dtstr))
     exp = Experiment(args.logdir)
-    args.output = os.path.join(os.path.expanduser(args.output), dtstr)  #.replace("result","weight")   
+    args.output = os.path.join(os.path.expanduser(args.output), dtstr)  #.replace("result","weight")
     print(args)
 
     os.makedirs(args.output, exist_ok=True)
@@ -362,28 +406,27 @@ if __name__== "__main__":
         json.dump(args.__dict__, f, indent=4)
     with open(os.path.join(args.logdir, "args.json"), mode="w") as f:
         json.dump(args.__dict__, f, indent=4)
-    
 
-    # to be deterministic
-    if args.seed > 0:
-        cudnn.deterministic = True
     cudnn.benchmark = True
-    random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
+    # to be deterministic
+    if args.seed >= 0:
+        cudnn.deterministic = True
+        random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed(args.seed)
 
     # pretraining and finetuing iterations
-    if args.learning_mode=="combined":  
+    if args.learning_mode=="combined":
         modes = ["pretraining","finetuning"]
     else:
         modes = [args.learning_mode]
 
     for mode in modes:
         starttime = time.time()
-        if args.pidf in ["nccl","gloo"]:
+        if args.dist_backend in ["nccl","gloo"]:
             mp.spawn(dpp_train,args=(args.world_size,args,mode,exp),nprocs=args.world_size,join=True)
         else:
-            dpp_train(0, args.world_size, args, mode,exp)  
+            dpp_train(0, args.world_size, args, mode,exp)
         endtime = time.time()
         interval = endtime - starttime
         print("{0} elapsed time = {1:d}h {2:d}m {3:d}s".format(mode, int(interval/3600), int((interval%3600)/60), int((interval%3600)%60)))
@@ -393,7 +436,7 @@ if __name__== "__main__":
         torch.cuda.empty_cache()
         # set weight file
         fns = sorted(glob.glob(os.path.join(args.output,'*.pth')), key=lambda f: os.stat(f).st_mtime, reverse=True)
-        args.path2weight = fns[0]
+        if len(fns)>0:
+            args.path2weight = fns[0]
 
     print(args)
-    

@@ -74,7 +74,7 @@ class DatasetFolderPH(VisionDataset):
         if self.args.label_type_pt == "raw":
             hs = np.load(os.path.join(self.args.path2PHdir, os.path.splitext(os.path.basename(path))[0]+".npy")).astype(np.float32)
         else:
-            if self.args.cachedir is not None:
+            if self.args.cachedir is not None and (not self.args.persistence_after_transform):
                 cachefn = os.path.join(self.args.cachedir, os.path.splitext(os.path.basename(path))[0]+"_cache.npy")                
             else:
                 cachefn = ""
