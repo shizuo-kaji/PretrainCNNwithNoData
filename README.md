@@ -1,6 +1,8 @@
 # Teaching topology to CNN by pretraining with persistent homology
 by Shizuo Kaji, 2021
 
+![Schema](https://github.com/shizuo-kaji/PretrainCNNwithNoData/blob/master/demo/schema.png?raw=true)
+
 The codes provide a scheme for pretraining deep neural networks
 with synthetic images and mathematically defined labels that captures
 topological information in images.
